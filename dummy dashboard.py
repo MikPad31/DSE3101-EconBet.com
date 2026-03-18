@@ -77,7 +77,7 @@ sidebar = html.Div([
     # --- LOGO INSERTION HERE ---
     # Dash will automatically look in the 'assets' folder for this image.
     html.Img(
-        src='/assets/logo.png', 
+        src='logo.png', 
         style={
             'maxWidth': '100%', 
             'marginBottom': '20px', 
