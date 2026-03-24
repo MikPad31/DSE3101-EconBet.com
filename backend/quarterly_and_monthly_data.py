@@ -31,7 +31,7 @@ for series_id in series_ids:
         fred_data = pd.merge(fred_data, series_df, left_index=True, right_index=True, how="outer")
 
 fred_data_filtered = fred_data[fred_data.index >= '1959-01-01' ]
-fred_data_filtered= fred_data_filtered.interpolate(method="linear", limit_area="inside")
+fred_data_filtered= fred_data_filtered.interpolate(method="linear")
 fred_data_filtered
 
 #function for checking of stationarity with alpha 0.5
