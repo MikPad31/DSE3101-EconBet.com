@@ -175,3 +175,8 @@ Monthly_Data = pd.merge(fred_data_transformed, GDP_M, left_index=True, right_ind
 #adding Covid variable
 Monthly_Data["Covid"] = ((Monthly_Data.index >= "2020-03-01") & (Monthly_Data.index <= "2021-12-01")).astype(int)
 Quarterly_Data["Covid"] = ((Quarterly_Data.index >= "2020-01-01") & (Quarterly_Data.index <= "2021-12-01")).astype(int)
+
+def get_quarterly_data():
+    return Quarterly_Data
+def get_monthly_data():
+    return Monthly_Data
