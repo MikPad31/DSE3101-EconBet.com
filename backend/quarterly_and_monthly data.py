@@ -31,12 +31,12 @@ for series_id in series_ids:
         fred_data = pd.merge(fred_data, series_df, left_index=True, right_index=True, how="outer")
 
 fred_data_filtered = fred_data[fred_data.index >= '1959-01-01' ]
-fred_data_filtered= fred_data_filtered.bfill()
+fred_data_filtered= fred_data_filtered.interpolate(method="linear", limit_area="inside")
 fred_data_filtered
 
 #function for checking of stationarity with alpha 0.5
 def check_stationarity(series, alpha=0.05):
-    result = adfuller(series)
+    result = adfuller(series.dropna())
     p_value = result[1]
     if p_value < alpha:
         print(f"{series.name} is stationary (p-value: {p_value})")
@@ -57,15 +57,17 @@ fred_data_transformed['UNRATE'] = fred_data_filtered['UNRATE'].diff()
 fred_data_transformed['GS10'] = fred_data_filtered['GS10'].diff()
 fred_data_transformed['TB3MS'] = fred_data_filtered['TB3MS'].diff()
 
-#apply transformation for code 4
+#apply transformation for code 4; i decided to use log differencing
 fred_data_transformed['HOUST'] = np.log(fred_data_filtered['HOUST'])
+fred_data_transformed['HOUST'] = fred_data_transformed['HOUST'].diff()
+
 
 #apply transformation code 5
 fred_data_transformed['RPI'] = np.log(fred_data_filtered['RPI'])
 fred_data_transformed['RPI'] = fred_data_transformed['RPI'].diff()
 
 fred_data_transformed['INDPRO'] = np.log(fred_data_filtered['INDPRO'])
-fred_data_transformed['INDPRO'] = fred_data_filtered['INDPRO'].diff()
+fred_data_transformed['INDPRO'] = fred_data_transformed['INDPRO'].diff()
 
 #apply transformation code 6
 fred_data_transformed['INVEST'] = np.log(fred_data_filtered['INVEST'])
@@ -169,3 +171,7 @@ Quarterly_Data = pd.merge(Var_Q, GDP_Q_diff, left_index=True, right_index=True, 
 
 #monthly data with GDPC1 filled up by forward fill
 Monthly_Data = pd.merge(fred_data_transformed, GDP_M, left_index=True, right_index=True, how='left')
+
+#adding Covid variable
+Monthly_Data["Covid"] = ((Monthly_Data.index >= "2020-03-01") & (Monthly_Data.index <= "2021-12-01")).astype(int)
+Quarterly_Data["Covid"] = ((Quarterly_Data.index >= "2020-01-01") & (Quarterly_Data.index <= "2021-12-01")).astype(int)
