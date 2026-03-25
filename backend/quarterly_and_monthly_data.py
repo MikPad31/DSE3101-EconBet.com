@@ -100,7 +100,7 @@ def months_to_quarter_end(date):
         return 0
 
 #function to fit AR(2) model
-def fit_direct_ar2(series, h):
+def predictor_model(series, h):
     s = pd.to_numeric(series, errors="coerce").dropna()
 
     df_model = pd.DataFrame({
@@ -136,7 +136,7 @@ def fill_values(df):
             continue
 
         for h in range(1, h_max + 1):
-            model = fit_direct_ar2(observed, h=h)
+            model = predictor_model(observed, h=h)
 
             X_new = pd.DataFrame({
                 "const": [1.0],
