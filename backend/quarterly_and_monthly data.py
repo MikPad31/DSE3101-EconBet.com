@@ -180,3 +180,15 @@ def get_quarterly_data():
     return Quarterly_Data
 def get_monthly_data():
     return Monthly_Data
+
+### RANDOM FOREST DATA ###
+### Used data that was not differenciated, random forest performs with economic noise ###
+### used a hybrid model, refer to random_forest_model.py for details ###
+
+filled_raw = fill_values(fred_data_filtered) 
+Var_Q_raw = filled_raw.resample("QS").mean()
+Quarterly_RF = pd.merge(Var_Q_raw, GDP_Q_diff, left_index=True, right_index=True, how='left')
+Quarterly_RF["Covid"] = ((Quarterly_RF.index >= "2020-01-01") & 
+                          (Quarterly_RF.index <= "2021-12-01")).astype(int)
+def get_quarterly_data_rf():
+    return Quarterly_RF
