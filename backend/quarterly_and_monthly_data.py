@@ -31,7 +31,7 @@ for series_id in series_ids:
         fred_data = pd.merge(fred_data, series_df, left_index=True, right_index=True, how="outer")
 
 fred_data_filtered = fred_data[fred_data.index >= '1959-01-01' ]
-fred_data_filtered= fred_data_filtered.interpolate(method="linear", limit_area="inside")
+fred_data_filtered= fred_data_filtered.interpolate(method="linear")
 fred_data_filtered
 
 #function for checking of stationarity with alpha 0.5
@@ -156,8 +156,6 @@ filled_df = fill_values(fred_data_transformed)
 #aggregate variables into quarterly
 Var_Q = filled_df.resample("QS").mean()
 
-
-
 #import GDP and transform
 GDP_Q = pd.DataFrame(fred.get_series("GDPC1"))
 GDP_Q.rename(columns = {0: 'GDPC1'}, inplace = True)
@@ -175,3 +173,20 @@ Monthly_Data = pd.merge(fred_data_transformed, GDP_M, left_index=True, right_ind
 #adding Covid variable
 Monthly_Data["Covid"] = ((Monthly_Data.index >= "2020-03-01") & (Monthly_Data.index <= "2021-12-01")).astype(int)
 Quarterly_Data["Covid"] = ((Quarterly_Data.index >= "2020-01-01") & (Quarterly_Data.index <= "2021-12-01")).astype(int)
+
+def get_quarterly_data():
+    return Quarterly_Data
+def get_monthly_data():
+    return Monthly_Data
+
+### RANDOM FOREST DATA ###
+### Used data that was not differenciated, random forest performs with economic noise ###
+### used a hybrid model, refer to random_forest_model.py for details ###
+
+filled_raw = fill_values(fred_data_filtered) 
+Var_Q_raw = filled_raw.resample("QS").mean()
+Quarterly_RF = pd.merge(Var_Q_raw, GDP_Q_diff, left_index=True, right_index=True, how='left')
+Quarterly_RF["Covid"] = ((Quarterly_RF.index >= "2020-01-01") & 
+                          (Quarterly_RF.index <= "2021-12-01")).astype(int)
+def get_quarterly_data_rf():
+    return Quarterly_RF
