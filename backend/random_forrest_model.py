@@ -3,11 +3,10 @@ import os
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
-from quarterly_and_monthly_data import get_quarterly_data_rf
+from quarterly_and_monthly_data import get_quarterly_data_rf, months_missing
 
 # get current file directory
 quarterly_data = get_quarterly_data_rf()
-
 df_quarterly = quarterly_data.copy()
 df_quarterly.index = pd.to_datetime(df_quarterly.index)
 df_quarterly = df_quarterly.sort_index()
@@ -52,7 +51,7 @@ for n in n_estimators_list:
         y_pred = rf.predict(X_test)
         rmse = np.sqrt(mean_squared_error(y_test, y_pred))
         results.append((n, d, rmse))
-        print(f"[COARSE] n={n}, depth={d}, RMSE={rmse:.4f}")
+        #print(f"[COARSE] n={n}, depth={d}, RMSE={rmse:.4f}")
         if rmse < best_rmse:
             best_rmse = rmse
             best_params = (n, d)
@@ -70,11 +69,12 @@ y_pred = rf.predict(Xcurrent)
 
 # Predict current quarter GDP nowcast
 current_gdp_nowcast = rf.predict(Xcurrent)
-
 print("\nBest RMSE:", best_rmse)
 print("Best Params:", best_params)
-print(f"Current GDP Nowcast ({Xcurrent.index[0].date()}): {current_gdp_nowcast[0]:.4f}")
-
+print(
+    f"Current GDP Nowcast ({Xcurrent.index[0].date()}): {current_gdp_nowcast[0]:.4f} "
+    f"(based on {3 - months_missing}/3 months of data)"
+)
 # Historical Predictions (CV Approach - RF trained)
 cv_errors = []
 cv_preds = []
@@ -114,4 +114,6 @@ cv_results = pd.DataFrame({
     "Predicted": cv_preds
 }).set_index("Date")
 cv_results = pd.concat([cv_results, nowcast_row])
-print(cv_results.tail(30))
+
+def predicted_vs_actual_gdp():
+    return cv_results 

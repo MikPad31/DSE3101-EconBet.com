@@ -184,22 +184,12 @@ def get_monthly_data():
 ### used a hybrid model, refer to random_forest_model.py for details ###
 
 filled_raw = fill_values(fred_data_filtered) 
-last_date = filled_raw.index.max()
-months_missing = months_to_quarter_end(last_date)
-for i in range(1, months_missing + 2):
-    new_date = last_date + pd.DateOffset(months=i)
-    filled_raw.loc[new_date] = np.nan
-filled_raw = filled_raw.sort_index()
 Var_Q_raw = filled_raw.resample("QS").mean()
 Quarterly_RF = pd.merge(Var_Q_raw, GDP_Q_diff, left_index=True, right_index=True, how='left')
 Quarterly_RF["Covid"] = ((Quarterly_RF.index >= "2020-01-01") & (Quarterly_RF.index <= "2021-12-01")).astype(int)
 Quarterly_RF["SARS"] = ((Quarterly_RF.index >= "2003-03-01") & (Quarterly_RF.index <= "2003-07-01")).astype(int)
+last_date = fred_data_filtered.index.max()
+months_missing = months_to_quarter_end(last_date)
 
 def get_quarterly_data_rf():
     return Quarterly_RF
-
-print(months_missing)
-print(filled_raw.tail(6))
-print(Quarterly_RF.tail(6))
-#print(Monthly_Data.tail(10))
-#print(Quarterly_Data.tail(10))
