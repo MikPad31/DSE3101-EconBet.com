@@ -7,6 +7,7 @@ from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_d
 
 TARGET_COL = "GDPC1"
 
+# Prepare data set for AR(2)
 def prepare_ar2_dataset(
         quarterly_data : pd.DataFrame,
         target_col :str = TARGET_COL,
@@ -16,12 +17,12 @@ def prepare_ar2_dataset(
     Parameters
     ----------
     quarterly_data : pd.DataFrame
-        Pandas DataFrame of quarterly data.
+        Quarterly Dataframe from the preprocessing pipeline, containing target column and predictor all columns.
     target_col :str = TARGET_COL
         Target column for model, defined as GDPC1.
 
     Returns
-    ----------
+    -------
     full_df
         Full dataset including NaNs
     model_df
@@ -36,6 +37,9 @@ def prepare_ar2_dataset(
     model_df = full_df.dropna(subset=[target_col, "lag1", "lag2"]).copy()
     return full_df, model_df
 
+
+
+# Fitting AR(2) model
 def fit_ar2_model(
         quarterly_data : pd.DataFrame,
         target_col : str = TARGET_COL 
@@ -50,7 +54,7 @@ def fit_ar2_model(
         Target column for model, defined as GDPC1.
 
     Returns
-    ---------
+    -------
     model
         Fitted statsmodels OLS object.
     full_df : pd.DataFrame
@@ -73,7 +77,6 @@ def fit_ar2_model(
     return model, full_df, model_df
 
 
-
 def nowcast_curr_quarter_ar2(
         quarterly_data : pd.DataFrame,
         model,
@@ -91,7 +94,7 @@ def nowcast_curr_quarter_ar2(
         Target column for model, defined as GDPC1.
 
     Returns
-    ----------
+    -------
     target_quarter
         Date of the forecasted quarter.
     nowcast
@@ -136,7 +139,7 @@ def nowcast_curr_quarter_ar2(
 #         Second most recent observed GDP growth.
 
 #     Returns
-#     ---------
+#     -------
 #     quarterly_forecasts
 #         pd.Series of forecasts indexed by quarter.
 #     """
