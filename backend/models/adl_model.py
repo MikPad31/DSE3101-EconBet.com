@@ -411,4 +411,4 @@ def adl_monthly_update_nowcast(
 
     nowcast = float(model.predict(X_new).iloc[0])
 
-    return target_quarter, nowcast, n_months_observed
+    return target_quarter, nowcast, n_months_observeds
