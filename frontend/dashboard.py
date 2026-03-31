@@ -146,7 +146,21 @@ app.layout = html.Div(id='main-page-wrapper', children=[
                 kpi_ribbon,
                 
                 dbc.Card(id='chart-card', children=dbc.CardBody([
-                    html.H5(id='chart-card-title', children="Real-Time GDP Growth Path", className="mb-3 fw-bold"),
+    
+    # NEW FLEX CONTAINER: Holds Title on the Left, Buttons on the Right
+                    html.Div([
+                        html.H5(id='chart-card-title', children="Real-Time GDP Growth Path", className="m-0 fw-bold"),
+                        
+                        # The Time Range Buttons
+                        html.Div([
+                            html.Button("1Y", id="btn-1y", n_clicks=0, className="time-btn"),
+                            html.Button("5Y", id="btn-5y", n_clicks=0, className="time-btn"),
+                            html.Button("10Y", id="btn-10y", n_clicks=0, className="time-btn"),
+                            html.Button("MAX", id="btn-max", n_clicks=0, className="time-btn"),
+                        ], style={'display': 'flex', 'gap': '5px'})
+                        
+                    ], style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'marginBottom': '15px'}),
+
                     dcc.Graph(id='hero-chart', style={'height': '50vh'}),
                     html.Div([
                         dcc.RangeSlider(
@@ -319,6 +333,35 @@ def update_dashboard(n_clicks, selected_models, year_range):
             text_color_force, text_color_force, text_color_force, text_color_force, text_color_force, text_color_force, text_color_force, text_color_force,
             checklist_label_style, tbl_header, tbl_data, tbl_cell, tbl_cond, slider_marks, fig,
             kpi_1_val, kpi_1_sub, kpi_1_sub_style, kpi_2_val, kpi_3_val)
+
+# ==========================================
+# TIME RANGE BUTTON CALLBACK
+# ==========================================
+@app.callback(
+    Output('year-slider', 'value'), # This tells the slider where to snap to
+    [Input('btn-1y', 'n_clicks'),
+     Input('btn-5y', 'n_clicks'),
+     Input('btn-10y', 'n_clicks'),
+     Input('btn-max', 'n_clicks')],
+    prevent_initial_call=True # Prevents it from running when the page first loads
+)
+def update_slider_from_buttons(btn1, btn5, btn10, btnmax):
+    ctx = dash.callback_context
+
+    # Figure out exactly which button was just clicked
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    # Calculate the range backwards from the absolute max_year
+    if button_id == 'btn-1y':
+        return [max(min_year, max_year - 1), max_year]
+    elif button_id == 'btn-5y':
+        return [max(min_year, max_year - 5), max_year]
+    elif button_id == 'btn-10y':
+        return [max(min_year, max_year - 10), max_year]
+    else: # MAX button
+        return [min_year, max_year]
 
 if __name__ == '__main__':
     app.run(debug=False)
