@@ -42,6 +42,36 @@ div, .card, h5, h6, label, table, th, td {
     border-color: steelblue !important;
 }
 
+/* =========================================================
+   NEW: FIXING THE WHITE BOXES ON THE SLIDER
+========================================================= */
+/* Forces the slider tooltips to be completely transparent so they match the theme */
+.rc-slider-tooltip-inner {
+    background-color: transparent !important;
+    color: inherit !important; /* Inherits the white/black text from Python */
+    box-shadow: none !important;
+    border: none !important;
+}
+
+/* Hides the tiny white arrow pointing from the tooltip to the slider handle */
+.rc-slider-tooltip-arrow {
+    display: none !important;
+}
+
+/* Ensures generic text marks never get a solid background */
+.rc-slider-mark-text {
+    background: transparent !important;
+}
+
+/* Catches any actual number input fields that Dash might generate */
+input[type="number"], input[type="text"] {
+    background-color: transparent !important;
+    color: inherit !important;
+    border: 1px solid #2d3f6d !important;
+    border-radius: 4px;
+    padding: 2px 4px;
+}
+
 /* 4. DATATABLE FIX */
 /* Stops the table cells from flashing pink/blue when clicked */
 .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td.focused {
