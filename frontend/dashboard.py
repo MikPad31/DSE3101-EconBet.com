@@ -1,367 +1,673 @@
-# INSTALLATION REQUIRED: 
-# pip install dash dash-bootstrap-components pandas plotly numpy
-
-import dash
-from dash import dcc, html, dash_table, Input, Output
-import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
+import streamlit as st
 import pandas as pd
 import numpy as np
-import os
+import plotly.graph_objects as go
+from scipy import stats
 
-# ==========================================
-# STEP 1: LOAD REAL BACKEND DATA
-# ==========================================
-# Looks for the CSV in the backend/data folder, or falls back to local directory
-df = pd.read_csv('backend/data/ensemble_forecasts.csv') 
+st.set_page_config(
+    page_title="Macro Nowcasting Terminal",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
-df['Date'] = pd.to_datetime(df['date'])
+# ── Palette ────────────────────────────────────────────────────────────────────
+STEEL      = "#4682B4"
+GREEN      = "#5cb85c"
+AMBER      = "#f39c12"
+RED        = "#e74c3c"
+PURPLE     = "#9b59b6"
+BLUE_LINE  = "#5dade2"
+DARK_BG    = "#060b14"
+CARD_BG    = "#10192e"
+SIDEBAR_BG = "#0b1221"
+BORDER     = "#1f3052"
 
-# Mapping CSV columns to the Dashboard logic
-df = df.rename(columns={
-    'actual': 'Official_GDP',
-    'forecast_AR': 'AR_Benchmark',
-    'forecast_ADL': 'Model_3_ADL',
-    'forecast_RF': 'Random_Forest_Bridge',
-    'forecast_Ensemble': 'Combined_Nowcast',
-    'CI_Lower': 'Lower_Bound',
-    'CI_Upper': 'Upper_Bound'
-})
+# ── CSS injection ──────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
-# Dynamic Status Logic (Color-coded certainty spectrum based on latest data)
-max_date = df['Date'].max()
-statuses = []
-for d in df['Date']:
-    if d >= max_date - pd.DateOffset(months=3): # Very latest is Forecast
-        statuses.append('Forecast')
-    elif d >= max_date - pd.DateOffset(months=9): # Previous are flash/backcasts
-        statuses.append('Flash Estimate')
-    else:
-        statuses.append('Official')
-df['Status'] = statuses
+* { font-family: 'Inter', -apple-system, sans-serif !important; }
 
-# Hide actuals for future/unreleased dates
-df['Official_GDP'] = np.where(df['Status'] == 'Official', df['Official_GDP'], np.nan)
+/* Hide Streamlit chrome */
+#MainMenu, footer, header { visibility: hidden; }
 
-min_year = df['Date'].dt.year.min()
-max_year = df['Date'].dt.year.max()
-
-# Dummy ragged edge data (can be replaced with real FRED status later)
-ragged_data = pd.DataFrame({
-    'Indicator': ['Housing Starts', 'BAA-AAA Spread', 'Ind. Production', 'Retail Sales', 'Nonfarm Payrolls'],
-    'Frequency': ['Monthly', 'Daily', 'Monthly', 'Monthly', 'Monthly'],
-    'Latest Data Month': ['Feb 2026', 'Mar 2026', 'Jan 2026', 'Feb 2026', 'Feb 2026'],
-    'Status': ['Released', 'Released', 'Revised', 'Pending', 'Released']
-})
-
-# ==========================================
-# STEP 2: THEME DICTIONARY & BRANDING
-# ==========================================
-BRAND_GREEN = "#5cb85c"
-
-THEMES = {
-    True: { # DARK MODE
-        "bg": "#060b14", "sidebar_bg": "#0b1221", "card": "#10192e",
-        "border": "#1f3052", "text": "#ffffff", "grid": "#1f3052",
-        "logo_src": "assets/logo_dark.png" 
-    },
-    False: { # LIGHT MODE
-        "bg": "#f4f6f9", "sidebar_bg": "#ffffff", "card": "#ffffff",
-        "border": "#dee2e6", "text": "#212529", "grid": "#e9ecef",
-        "logo_src": "assets/logo_light.png" 
-    }
+/* Metric cards */
+[data-testid="metric-container"] {
+    background-color: #10192e;
+    border: 1px solid #1f3052;
+    border-radius: 10px;
+    padding: 18px 20px;
 }
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+/* Tabs */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 4px;
+    border-bottom: 1px solid #1f3052;
+    background: transparent;
+}
+.stTabs [data-baseweb="tab"] {
+    background: transparent;
+    border: none;
+    color: #666;
+    font-weight: 600;
+    font-size: 14px;
+    padding: 10px 20px;
+    border-radius: 6px 6px 0 0;
+}
+.stTabs [aria-selected="true"] {
+    background: #10192e !important;
+    color: #4682B4 !important;
+    border-bottom: 2px solid #4682B4 !important;
+}
 
-# ==========================================
-# STEP 3: DASHBOARD LAYOUT
-# ==========================================
-sidebar = html.Div(id='sidebar-container', children=[
-    html.Img(id='logo-img', style={'maxWidth': '100%', 'marginBottom': '20px'}),
-    html.H5(id='page-title-text', children="Macro Nowcasting Terminal", className="fw-bold mb-4"),
-    html.Hr(id='sidebar-hr'),
-    
-    html.Label(id='select-models-label', children="Select Forecasting Models:", className="fw-bold mb-3"),
-    dbc.Checklist(
-        id='model-checklist',
-        options=[
-            {'label': ' AR Benchmark', 'value': 'AR_Benchmark'},
-            {'label': ' ADL Model', 'value': 'Model_3_ADL'},
-            {'label': ' Random Forest Bridge', 'value': 'Random_Forest_Bridge'},
-            {'label': ' Combined Nowcast', 'value': 'Combined_Nowcast'},
-            {'label': ' 📊 Show Confidence Interval', 'value': 'Show_CI'}
-        ],
-        value=['Combined_Nowcast', 'Show_CI'],
-        switch=True, 
-        className="mb-4"
-    ),
-    
-    html.Label(id='historical-vintage-label', children="Historical Time-Travel Vintage:", className="fw-bold mb-2"),
-    dcc.Dropdown(
-        id='vintage-dropdown',
-        options=[{'label': 'March 2026 (Live)', 'value': 'Mar26'},
-                 {'label': 'February 2026', 'value': 'Feb26'}],
-        value='Mar26', clearable=False, style={"color": "#000", "marginBottom": "20px"} 
-    ),
-    
-    # REACT/TAILWIND STYLE TOGGLE
-    html.Div(
-        id='theme-toggle-container',
-        n_clicks=0,
-        children=[
-            html.Div(id='theme-toggle-sun', children="☀"),
-            html.Div(id='theme-toggle-moon', children="☾")
-        ]
+/* Sidebar */
+[data-testid="stSidebar"] {
+    background-color: #0b1221;
+    border-right: 1px solid #1f3052;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1f3052; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #2d4a7a; }
+
+/* Narrative pull-quote */
+.narrative-block {
+    background-color: #10192e;
+    border-left: 3px solid #4682B4;
+    border-radius: 0 8px 8px 0;
+    padding: 16px 22px;
+    margin-bottom: 20px;
+    line-height: 1.7;
+    font-size: 15px;
+    color: #c8d6e8;
+}
+
+/* Status bar */
+.status-bar {
+    background-color: #0b1221;
+    border: 1px solid #1f3052;
+    border-radius: 8px;
+    padding: 8px 18px;
+    font-size: 12px;
+    color: #666;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 22px;
+    letter-spacing: 0.02em;
+}
+
+/* Section headers */
+.section-header {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #4682B4;
+    margin-bottom: 4px;
+}
+
+/* Ragged edge table */
+.ragged-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+.ragged-table th {
+    background-color: #0b1221;
+    color: #888;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    border-bottom: 1px solid #1f3052;
+    text-align: left;
+}
+.ragged-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid #1a2642;
+    color: #c8d6e8;
+}
+.ragged-table tr:last-child td { border-bottom: none; }
+.badge-released { color: #5cb85c; font-weight: 700; }
+.badge-pending  { color: #f39c12; font-weight: 700; }
+.badge-revised  { color: #3498db; font-weight: 700; }
+
+hr { border-color: #1f3052 !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ── Data loading ───────────────────────────────────────────────────────────────
+@st.cache_data
+def load_data():
+    df = pd.read_csv("backend/data/ensemble_forecasts.csv")
+    df["Date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("Date").reset_index(drop=True)
+
+    max_date = df["Date"].max()
+    def classify(d):
+        if d >= max_date - pd.DateOffset(months=3):
+            return "Forecast"
+        elif d >= max_date - pd.DateOffset(months=9):
+            return "Flash Estimate"
+        return "Official"
+
+    df["Status"] = df["Date"].apply(classify)
+    df["actual"] = np.where(df["Status"] == "Official", df["actual"], np.nan)
+    return df
+
+
+@st.cache_data
+def load_metrics():
+    mdf = pd.read_csv("backend/data/model_metrics.csv")
+    weights = 1 / mdf["RMSFE"]
+    mdf["Weight"] = (weights / weights.sum() * 100).round(1)
+    return mdf
+
+
+df       = load_data()
+mdf      = load_metrics()
+
+# ── Derived metrics ────────────────────────────────────────────────────────────
+official     = df[df["Status"] == "Official"]
+non_official = df[df["Status"] != "Official"]
+
+current_q = non_official.iloc[0] if not non_official.empty else df.iloc[-1]
+prev_q    = official.iloc[-1]  if not official.empty  else None
+
+std_est       = (current_q["CI_Upper"] - current_q["CI_Lower"]) / (2 * 1.96)
+recession_prob = (
+    stats.norm.cdf(0, loc=current_q["forecast_Ensemble"], scale=std_est) * 100
+    if std_est > 0 else 0.0
+)
+
+momentum = (
+    current_q["forecast_Ensemble"] - prev_q["forecast_Ensemble"]
+    if prev_q is not None else 0.0
+)
+
+
+# ── Narrative generator ────────────────────────────────────────────────────────
+def generate_narrative():
+    val     = current_q["forecast_Ensemble"]
+    period  = current_q["Date"].to_period("Q")
+    delta   = momentum
+    dirn    = "accelerated" if delta > 0.05 else "decelerated" if delta < -0.05 else "held steady"
+    ci_w    = current_q["CI_Upper"] - current_q["CI_Lower"]
+    uncert  = "narrow" if ci_w < 5 else "moderate" if ci_w < 10 else "wide"
+    risk_l  = "limited" if recession_prob < 15 else "elevated" if recession_prob < 30 else "significant"
+    trend   = "above-trend" if val > 2.0 else "below-trend" if val < 1.0 else "near-trend"
+    outlook = "continued expansion" if val > 1.5 else "moderate growth" if val > 0 else "potential contraction"
+
+    return (
+        f"The combined nowcast for <b>{period}</b> stands at <b>{val:.2f}%</b>, having {dirn} "
+        f"by {abs(delta):.2f}pp from the prior quarter. "
+        f"Model consensus is {uncert} (95%&nbsp;CI:&nbsp;[{current_q['CI_Lower']:.1f}%,&nbsp;"
+        f"{current_q['CI_Upper']:.1f}%]), signalling <b>{risk_l} downside risk</b> with a "
+        f"{recession_prob:.1f}% implied probability of contraction. "
+        f"The current trajectory is consistent with <b>{outlook}</b> and {trend} output dynamics."
     )
-    
-], style={
-    'padding': '25px', 'height': '100vh', 'position': 'sticky', 'top': '0',                  
-    'overflowY': 'auto', 'transition': 'all 0.3s ease', 'display': 'flex', 'flexDirection': 'column'
-})
 
-kpi_ribbon = dbc.Row([
-    dbc.Col(dbc.Card(id='kpi-card-1', children=dbc.CardBody([
-        html.H6(id='kpi-header-1', children="Current Nowcast (Combined)"),
-        html.H3(id='kpi-value-1', children="...", className="fw-bold m-0", style={"color": BRAND_GREEN}),
-        html.Div(id='kpi-subtext-1', children="...", style={"fontSize": "13px", "marginTop": "4px"})
-    ]))),
-    dbc.Col(dbc.Card(id='kpi-card-2', children=dbc.CardBody([
-        html.H6(id='kpi-header-2', children="Next Quarter Forecast (T+1)"),
-        html.H3(id='kpi-value-2', children="...", className="text-warning fw-bold m-0"),
-        html.Div(id='kpi-subtext-2', children="Forward Guidance", style={"fontSize": "13px", "marginTop": "4px", "color": "#888"})
-    ]))),
-    dbc.Col(dbc.Card(id='kpi-card-3', children=dbc.CardBody([
-        html.H6(id='kpi-header-3', children="95% Confidence Range"),
-        html.H3(id='kpi-value-3', children="...", className="text-info fw-bold m-0"),
-        html.Div(id='kpi-subtext-3', children="Downside risk evaluated", style={"fontSize": "13px", "marginTop": "4px", "color": "#888"})
-    ])))
-], className="mb-4")
 
-app.layout = html.Div(id='main-page-wrapper', children=[
-    dbc.Container([
-        dbc.Row([
-            dbc.Col(sidebar, md=3, lg=2, className="px-0"),
-            dbc.Col(id='main-content', children=[
-                kpi_ribbon,
-                
-                dbc.Card(id='chart-card', children=dbc.CardBody([
-    
-    # NEW FLEX CONTAINER: Holds Title on the Left, Buttons on the Right
-                    html.Div([
-                        html.H5(id='chart-card-title', children="Real-Time GDP Growth Path", className="m-0 fw-bold"),
-                        
-                        # The Time Range Buttons
-                        html.Div([
-                            html.Button("1Y", id="btn-1y", n_clicks=0, className="time-btn"),
-                            html.Button("5Y", id="btn-5y", n_clicks=0, className="time-btn"),
-                            html.Button("10Y", id="btn-10y", n_clicks=0, className="time-btn"),
-                            html.Button("MAX", id="btn-max", n_clicks=0, className="time-btn"),
-                        ], style={'display': 'flex', 'gap': '5px'})
-                        
-                    ], style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center', 'marginBottom': '15px'}),
+# ── Sidebar ────────────────────────────────────────────────────────────────────
+with st.sidebar:
+    try:
+        st.image("frontend/assets/logo_dark.png", width="stretch")
+    except Exception:
+        st.markdown("### Macro Nowcasting Terminal")
 
-                    dcc.Graph(id='hero-chart', style={'height': '50vh'}),
-                    html.Div([
-                        dcc.RangeSlider(
-                            id='year-slider',
-                            min=min_year, max=max_year, step=1,
-                            value=[min_year, max_year],
-                            className="mt-4"
-                        )
-                    ], style={'padding': '0px 20px 20px 20px'})
-                ]), className="mb-4"),
-                
-                dbc.Card(id='table-card', children=dbc.CardBody([
-                    html.H5(id='table-card-title', children="Ragged Edge Data Monitor", className="mb-3 fw-bold"),
-                    dash_table.DataTable(id='ragged-edge-table', data=ragged_data.to_dict('records'))
-                ]))
-            ], md=9, lg=10, style={'padding': '30px', 'transition': 'all 0.3s ease'})
-        ])
-    ], fluid=True, style={"padding": "0", "overflowX": "hidden"})
+    st.markdown("---")
+    st.markdown("**Model Visibility**")
+    show_ar       = st.checkbox("AR Benchmark",         value=False)
+    show_adl      = st.checkbox("ADL Model",            value=False)
+    show_rf       = st.checkbox("Random Forest Bridge", value=False)
+    show_combined = st.checkbox("Combined Nowcast",     value=True)
+
+    st.markdown("**Confidence Interval**")
+    ci_level = st.radio(
+        "Confidence Interval", ["95% + 68%", "95% only", "Off"],
+        index=0, label_visibility="collapsed"
+    )
+
+    st.markdown("**Time Range**")
+    time_range = st.radio(
+        "Time Range", ["1Y", "5Y", "MAX"],
+        index=2, horizontal=True, label_visibility="collapsed"
+    )
+
+
+# ── Time range filter ──────────────────────────────────────────────────────────
+max_year = df["Date"].dt.year.max()
+if time_range == "1Y":
+    df_plot = df[df["Date"].dt.year >= max_year - 1].copy()
+elif time_range == "5Y":
+    df_plot = df[df["Date"].dt.year >= max_year - 5].copy()
+else:
+    df_plot = df.copy()
+
+
+# ── Base chart layout ──────────────────────────────────────────────────────────
+def base_layout(**overrides):
+    layout = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor=CARD_BG,
+        font=dict(family="Inter, sans-serif", color="#ffffff"),
+        margin=dict(l=20, r=20, t=30, b=20),
+        xaxis=dict(showgrid=True, gridcolor=BORDER, gridwidth=1, zeroline=False),
+        yaxis=dict(showgrid=True, gridcolor=BORDER, gridwidth=1,
+                   zerolinecolor=BORDER, title="GDP Growth Rate (%)"),
+        legend=dict(orientation="h", yanchor="top", y=-0.18,
+                    xanchor="center", x=0.5, bgcolor="rgba(0,0,0,0)"),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor=SIDEBAR_BG, font_color="#ffffff", bordercolor=BORDER),
+    )
+    layout.update(overrides)
+    return layout
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HEADER
+# ═══════════════════════════════════════════════════════════════════════════════
+st.markdown("## Macro Nowcasting Terminal")
+
+vintage_str = df["Date"].max().strftime("%B %d, %Y")
+st.markdown(f"""
+<div class="status-bar">
+    <span>📡 Data vintage: {vintage_str}</span>
+    <span>Models: AR · ADL · Random Forest · Ensemble</span>
+    <span>Frequency: Quarterly</span>
+</div>
+""", unsafe_allow_html=True)
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    mom_str = f"+{momentum:.2f}pp" if momentum >= 0 else f"{momentum:.2f}pp"
+    st.metric("Combined Nowcast",
+              f"{current_q['forecast_Ensemble']:.2f}%",
+              delta=f"{mom_str} vs prior quarter")
+with c2:
+    risk_label = "High risk" if recession_prob > 30 else "Moderate risk" if recession_prob > 15 else "Low risk"
+    st.metric("Recession Risk (P(GDP<0))",
+              f"{recession_prob:.1f}%",
+              delta=risk_label,
+              delta_color="inverse" if recession_prob > 15 else "normal")
+with c3:
+    ci_w = current_q["CI_Upper"] - current_q["CI_Lower"]
+    st.metric("95% Confidence Range",
+              f"[{current_q['CI_Lower']:.1f}%, {current_q['CI_Upper']:.1f}%]",
+              delta=f"±{ci_w / 2:.1f}pp uncertainty",
+              delta_color="off")
+
+st.markdown("---")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TABS
+# ═══════════════════════════════════════════════════════════════════════════════
+tab1, tab2, tab3 = st.tabs([
+    "  📊  Overview  ",
+    "  🔬  Model Performance  ",
+    "  🔭  Forward Outlook  ",
 ])
 
-# ==========================================
-# STEP 4: MASTER THEME & CHART CALLBACK
-# ==========================================
-@app.callback(
-    [Output('sidebar-container', 'style'), Output('main-content', 'style'), Output('main-page-wrapper', 'style'),
-     Output('kpi-card-1', 'style'), Output('kpi-card-2', 'style'), Output('kpi-card-3', 'style'),
-     Output('chart-card', 'style'), Output('table-card', 'style'),
-     Output('logo-img', 'src'),
-     Output('theme-toggle-container', 'style'), Output('theme-toggle-sun', 'style'), Output('theme-toggle-moon', 'style'),
-     Output('page-title-text', 'style'), Output('select-models-label', 'style'), Output('historical-vintage-label', 'style'),
-     Output('kpi-header-1', 'style'), Output('kpi-header-2', 'style'), Output('kpi-header-3', 'style'),
-     Output('chart-card-title', 'style'), Output('table-card-title', 'style'),
-     Output('model-checklist', 'labelStyle'),
-     Output('ragged-edge-table', 'style_header'), Output('ragged-edge-table', 'style_data'),
-     Output('ragged-edge-table', 'style_cell'), Output('ragged-edge-table', 'style_data_conditional'),
-     Output('year-slider', 'marks'),
-     Output('hero-chart', 'figure'),
-     # NEW: KPI Values Outputs
-     Output('kpi-value-1', 'children'), Output('kpi-subtext-1', 'children'), Output('kpi-subtext-1', 'style'),
-     Output('kpi-value-2', 'children'),
-     Output('kpi-value-3', 'children')],
-    [Input('theme-toggle-container', 'n_clicks'), 
-     Input('model-checklist', 'value'),
-     Input('year-slider', 'value')] 
-)
-def update_dashboard(n_clicks, selected_models, year_range):
-    is_dark = (n_clicks % 2 == 0) # 0 clicks = Dark Mode default
-    t = THEMES[is_dark]
-    
-    # Backgrounds and containers
-    wrapper_style = {'backgroundColor': t['bg'], 'minHeight': '100vh'}
-    sidebar_style = {'backgroundColor': t['sidebar_bg'], 'borderRight': f'1px solid {t["border"]}', 'color': t['text'], 'padding': '25px', 'height': '100vh', 'position': 'sticky', 'top': '0', 'overflowY': 'auto', 'display': 'flex', 'flexDirection': 'column'}
-    main_style = {'backgroundColor': t['bg'], 'padding': '30px', 'minHeight': '100vh', 'color': t['text']}
-    card_style = {'backgroundColor': t['card'], 'border': f'1px solid {t["border"]}', 'borderRadius': '8px', 'color': t['text'], 'boxShadow': '0 4px 6px rgba(0,0,0,0.1)'}
-    
-    text_color_force = {'color': t['text']}
-    checklist_label_style = {"display": "block", "marginBottom": "8px", "color": t['text'], "fontWeight": "normal"}
-    slider_marks = {str(y): {'label': str(y), 'style': {'color': t['text']}} for y in range(min_year, max_year+1)}
 
-    toggle_container_style = {
-        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between',
-        'width': '100%', 'padding': '4px', 'borderRadius': '9999px', 'marginTop': 'auto',
-        'cursor': 'pointer', 'transition': 'all 0.3s ease',
-        'backgroundColor': '#1a2642' if is_dark else '#f3f4f6',
-        'border': f'1px solid {"#2d3f6d" if is_dark else "#e5e7eb"}',
-    }
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 1 — OVERVIEW
+# ─────────────────────────────────────────────────────────────────────────────
+with tab1:
+    st.markdown(
+        f'<div class="narrative-block">{generate_narrative()}</div>',
+        unsafe_allow_html=True
+    )
 
-    sun_style = {
-        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
-        'width': '32px', 'height': '32px', 'borderRadius': '9999px', 'transition': 'all 0.3s ease', 'fontSize': '16px',
-        'backgroundColor': 'transparent' if is_dark else '#ffffff',
-        'color': '#6b7280' if is_dark else '#eab308',
-        'boxShadow': 'none' if is_dark else '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-    }
-
-    moon_style = {
-        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
-        'width': '32px', 'height': '32px', 'borderRadius': '9999px', 'transition': 'all 0.3s ease', 'fontSize': '16px',
-        'backgroundColor': '#2d3f6d' if is_dark else 'transparent',
-        'color': '#60a5fa' if is_dark else '#6b7280',
-        'boxShadow': '0 1px 2px 0 rgba(0, 0, 0, 0.05)' if is_dark else 'none',
-    }
-
-    tbl_header = {'backgroundColor': t['sidebar_bg'], 'color': t['text'], 'fontWeight': 'bold', 'border': f'1px solid {t["border"]}'}
-    tbl_data = {'backgroundColor': t['card'], 'color': t['text'], 'border': f'1px solid {t["border"]}'}
-    tbl_cell = {'fontFamily': 'Inter, sans-serif', 'textAlign': 'left', 'padding': '12px'}
-    tbl_cond = [
-        {'if': {'filter_query': '{Status} = "Pending"', 'column_id': 'Status'}, 'color': '#f39c12', 'fontWeight': 'bold'},
-        {'if': {'filter_query': '{Status} = "Released"', 'column_id': 'Status'}, 'color': BRAND_GREEN, 'fontWeight': 'bold'},
-        {'if': {'filter_query': '{Status} = "Revised"', 'column_id': 'Status'}, 'color': '#3498db', 'fontWeight': 'bold'}
-    ]
-
-    # ==========================================
-    # DATA-DRIVEN KPI LOGIC
-    # ==========================================
-    official_data = df[df['Status'] == 'Official']
-    if not official_data.empty and len(official_data) < len(df):
-        last_official_idx = official_data.index[-1]
-        
-        # 1. Current Nowcast (The quarter right after the last official release)
-        current_q = df.iloc[last_official_idx + 1]
-        prev_q = df.iloc[last_official_idx]
-        
-        delta = current_q['Combined_Nowcast'] - prev_q['Official_GDP']
-        kpi_1_val = f"{current_q['Combined_Nowcast']:.2f}%"
-        kpi_1_sub = f"▲ +{delta:.2f}% from prev quarter" if delta > 0 else f"▼ {delta:.2f}% from prev quarter"
-        kpi_1_sub_color = "#5cb85c" if delta > 0 else "#e74c3c"
-        
-        # 2. Next Quarter Forecast (T+1)
-        if last_official_idx + 2 < len(df):
-            next_q = df.iloc[last_official_idx + 2]
-            kpi_2_val = f"{next_q['Combined_Nowcast']:.2f}%"
-        else:
-            kpi_2_val = "N/A"
-            
-        # 3. Confidence Interval Range
-        kpi_3_val = f"[{current_q['Lower_Bound']:.2f}%, {current_q['Upper_Bound']:.2f}%]"
-    else:
-        kpi_1_val, kpi_1_sub, kpi_1_sub_color, kpi_2_val, kpi_3_val = "N/A", "N/A", "#888", "N/A", "N/A"
-
-    kpi_1_sub_style = {"fontSize": "13px", "marginTop": "4px", "fontWeight": "bold", "color": kpi_1_sub_color}
-
-    # ==========================================
-    # CHART GENERATION
-    # ==========================================
-    mask = (df['Date'].dt.year >= year_range[0]) & (df['Date'].dt.year <= year_range[1])
-    sub_df = df.loc[mask]
+    # ── Hero fan chart ────────────────────────────────────────────────────────
     fig = go.Figure()
 
-    def add_trace_custom(y_col, name, color, dash_style):
-        if y_col in selected_models:
-            fig.add_trace(go.Scatter(x=sub_df['Date'], y=sub_df[y_col], mode='lines+markers', name=name, marker=dict(size=6, line=dict(width=1, color=t['card'])), line=dict(color=color, dash=dash_style, width=2), hovertemplate=f"<b>{name}</b><br>Date: %{{x|%b %Y}}<br>Value: %{{y:.2f}}%<extra></extra>"))
+    # 95% CI band
+    if ci_level != "Off":
+        fig.add_trace(go.Scatter(
+            x=df_plot["Date"], y=df_plot["CI_Lower"],
+            mode="lines", line=dict(width=0),
+            showlegend=False, hoverinfo="skip"
+        ))
+        fig.add_trace(go.Scatter(
+            x=df_plot["Date"], y=df_plot["CI_Upper"],
+            mode="lines", line=dict(width=0),
+            fill="tonexty", fillcolor="rgba(70,130,180,0.13)",
+            name="95% CI", hoverinfo="skip"
+        ))
 
-    if 'Combined_Nowcast' in selected_models and 'Show_CI' in selected_models:
-        fig.add_trace(go.Scatter(x=sub_df['Date'], y=sub_df['Lower_Bound'], mode='lines', line=dict(width=0), showlegend=False, hoverinfo='skip'))
-        fig.add_trace(go.Scatter(x=sub_df['Date'], y=sub_df['Upper_Bound'], mode='lines', line=dict(width=0), fill='tonexty', fillcolor='rgba(92, 184, 92, 0.15)', name='95% Model Consensus Interval', hoverinfo='skip'))
+    # 68% CI band (derived from 95%)
+    if ci_level == "95% + 68%":
+        std_all  = (df_plot["CI_Upper"].values - df_plot["CI_Lower"].values) / (2 * 1.96)
+        ci68_lo  = df_plot["forecast_Ensemble"].values - std_all
+        ci68_hi  = df_plot["forecast_Ensemble"].values + std_all
+        fig.add_trace(go.Scatter(
+            x=df_plot["Date"], y=ci68_lo,
+            mode="lines", line=dict(width=0),
+            showlegend=False, hoverinfo="skip"
+        ))
+        fig.add_trace(go.Scatter(
+            x=df_plot["Date"], y=ci68_hi,
+            mode="lines", line=dict(width=0),
+            fill="tonexty", fillcolor="rgba(70,130,180,0.22)",
+            name="68% CI", hoverinfo="skip"
+        ))
 
-    add_trace_custom('AR_Benchmark', 'AR Benchmark', '#e74c3c', 'dashdot')
-    add_trace_custom('Model_3_ADL', 'ADL Model', '#3498db', 'dot')
-    add_trace_custom('Random_Forest_Bridge', 'Random Forest Bridge', '#f1c40f', 'dashdot')
-
-    if 'Combined_Nowcast' in selected_models:
-        def add_segment(status_filter, name, color, dash_style, line_width=3):
-            s_mask = sub_df['Status'] == status_filter
-            if not s_mask.any(): return
-            indices = np.where(s_mask)[0]
-            plot_idx = np.insert(indices, 0, indices[0]-1) if (len(indices) > 0 and indices[0] > 0) else indices
-            seg_df = sub_df.iloc[plot_idx]
-            fig.add_trace(go.Scatter(x=seg_df['Date'], y=seg_df['Combined_Nowcast'], mode='lines+markers', name=name, marker=dict(size=8, symbol='circle', color=color, line=dict(width=1.5, color=t['card'])), line=dict(color=color, width=line_width, dash=dash_style), hovertemplate=f"<b>{name}</b><br>Date: %{{x|%b %Y}}<br>Value: %{{y:.2f}}%<extra></extra>"))
-            
-        add_segment('Official', 'Nowcast (Historical Fit)', '#888888' if is_dark else '#555555', 'solid', line_width=2)
-        add_segment('Backcast', 'Backcast', '#f39c12', 'dot')
-        add_segment('Flash Estimate', 'Flash Estimate', BRAND_GREEN, 'dash')
-        add_segment('Forecast', '4-Quarter Forecast', '#9b59b6', 'dash')
-
-    official_mask = sub_df['Status'] == 'Official'
-    fig.add_trace(go.Scatter(x=sub_df.loc[official_mask, 'Date'], y=sub_df.loc[official_mask, 'Official_GDP'], mode='lines+markers', name='Official GDP (BEA)', marker=dict(size=6, color='#5dade2'), line=dict(color='#5dade2', width=4), hovertemplate="<b>Official BEA</b><br>Date: %{x|%b %Y}<br>Value: %{y:.2f}%<extra></extra>"))
-
-    fig.update_layout(
-        plot_bgcolor=t['card'], paper_bgcolor='rgba(0,0,0,0)', font=dict(family='Inter, sans-serif', color=t['text']),
-        margin=dict(l=20, r=20, t=20, b=20), xaxis=dict(showgrid=True, gridcolor=t['grid'], gridwidth=1, zeroline=False),
-        yaxis=dict(showgrid=True, gridcolor=t['grid'], gridwidth=1, zeroline=True, zerolinecolor=t['border'], title='GDP Growth Rate (%)'),
-        legend=dict(orientation='h', yanchor='top', y=-0.15, xanchor='center', x=0.5, bgcolor='rgba(0,0,0,0)'),
-        hovermode='x unified', hoverlabel=dict(bgcolor=t['sidebar_bg'], font_color=t['text'], bordercolor=t['border'])
+    # "Now" divider
+    now_x = str(current_q["Date"].date())
+    fig.add_shape(
+        type="line", xref="x", yref="paper",
+        x0=now_x, x1=now_x, y0=0, y1=1,
+        line=dict(dash="dash", color="#444", width=1.5)
     )
-    
-    # Returning 32 outputs exactly matching the @app.callback decorator list
-    return (sidebar_style, main_style, wrapper_style, card_style, card_style, card_style, card_style, card_style, t['logo_src'], 
-            toggle_container_style, sun_style, moon_style, 
-            text_color_force, text_color_force, text_color_force, text_color_force, text_color_force, text_color_force, text_color_force, text_color_force,
-            checklist_label_style, tbl_header, tbl_data, tbl_cell, tbl_cond, slider_marks, fig,
-            kpi_1_val, kpi_1_sub, kpi_1_sub_style, kpi_2_val, kpi_3_val)
+    fig.add_annotation(
+        x=now_x, y=1, yref="paper",
+        text="Now", showarrow=False,
+        font=dict(color="#666", size=11),
+        xanchor="left", yanchor="top"
+    )
 
-# ==========================================
-# TIME RANGE BUTTON CALLBACK
-# ==========================================
-@app.callback(
-    Output('year-slider', 'value'), # This tells the slider where to snap to
-    [Input('btn-1y', 'n_clicks'),
-     Input('btn-5y', 'n_clicks'),
-     Input('btn-10y', 'n_clicks'),
-     Input('btn-max', 'n_clicks')],
-    prevent_initial_call=True # Prevents it from running when the page first loads
-)
-def update_slider_from_buttons(btn1, btn5, btn10, btnmax):
-    ctx = dash.callback_context
+    # Individual model overlays
+    model_traces = [
+        ("forecast_AR",  "AR Benchmark",         RED,    "dashdot", show_ar),
+        ("forecast_ADL", "ADL Model",             STEEL,  "dot",     show_adl),
+        ("forecast_RF",  "Random Forest Bridge",  AMBER,  "dashdot", show_rf),
+    ]
+    for col, name, color, dash, visible in model_traces:
+        if visible:
+            fig.add_trace(go.Scatter(
+                x=df_plot["Date"], y=df_plot[col],
+                mode="lines+markers", name=name,
+                line=dict(color=color, dash=dash, width=1.5),
+                marker=dict(size=4),
+                hovertemplate=f"<b>{name}</b>: %{{y:.2f}}%<extra></extra>"
+            ))
 
-    # Figure out exactly which button was just clicked
-    if not ctx.triggered:
-        raise dash.exceptions.PreventUpdate
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    # Official BEA GDP
+    off_mask = df_plot["Status"] == "Official"
+    fig.add_trace(go.Scatter(
+        x=df_plot.loc[off_mask, "Date"],
+        y=df_plot.loc[off_mask, "actual"],
+        mode="lines+markers", name="Official GDP (BEA)",
+        line=dict(color=BLUE_LINE, width=3),
+        marker=dict(size=5),
+        hovertemplate="<b>Official GDP</b>: %{y:.2f}%<extra></extra>"
+    ))
 
-    # Calculate the range backwards from the absolute max_year
-    if button_id == 'btn-1y':
-        return [max(min_year, max_year - 1), max_year]
-    elif button_id == 'btn-5y':
-        return [max(min_year, max_year - 5), max_year]
-    elif button_id == 'btn-10y':
-        return [max(min_year, max_year - 10), max_year]
-    else: # MAX button
-        return [min_year, max_year]
+    # Combined Nowcast — segmented by status
+    if show_combined:
+        seg_config = [
+            ("Official",      "Nowcast (Hist. Fit)", "#555555", "solid",  2),
+            ("Flash Estimate", "Flash Estimate",      GREEN,     "dash",   2.5),
+            ("Forecast",      "4Q Forecast",          PURPLE,    "dash",   2.5),
+        ]
+        prev_status_last_idx = None
+        for status, label, color, dash, lw in seg_config:
+            s_mask = df_plot["Status"] == status
+            if not s_mask.any():
+                continue
+            # Prepend last row of previous segment for visual continuity
+            idxs = list(df_plot[s_mask].index)
+            if prev_status_last_idx is not None and prev_status_last_idx in df_plot.index:
+                idxs = [prev_status_last_idx] + idxs
+            seg = df_plot.loc[idxs]
+            prev_status_last_idx = df_plot[s_mask].index[-1]
 
-if __name__ == '__main__':
-    app.run(debug=False)
+            sym = "diamond" if status == "Forecast" else "circle"
+            fig.add_trace(go.Scatter(
+                x=seg["Date"], y=seg["forecast_Ensemble"],
+                mode="lines+markers", name=label,
+                line=dict(color=color, width=lw, dash=dash),
+                marker=dict(size=7 if status != "Official" else 0, symbol=sym,
+                            color=color, line=dict(width=1.5, color=DARK_BG)),
+                hovertemplate=f"<b>{label}</b>: %{{y:.2f}}%<extra></extra>"
+            ))
+
+    fig.update_layout(**base_layout(height=460))
+    st.plotly_chart(fig, width="stretch")
+
+    # ── Ragged edge data monitor ──────────────────────────────────────────────
+    st.markdown('<p class="section-header">Data Monitor</p>', unsafe_allow_html=True)
+
+    ragged_data = [
+        ("Housing Starts",   "Monthly", "Feb 2026", "Released"),
+        ("BAA–AAA Spread",   "Daily",   "Mar 2026", "Released"),
+        ("Ind. Production",  "Monthly", "Jan 2026", "Revised"),
+        ("Retail Sales",     "Monthly", "Feb 2026", "Pending"),
+        ("Nonfarm Payrolls", "Monthly", "Feb 2026", "Released"),
+    ]
+    badge = {
+        "Released": '<span class="badge-released">● Released</span>',
+        "Pending":  '<span class="badge-pending">● Pending</span>',
+        "Revised":  '<span class="badge-revised">● Revised</span>',
+    }
+    rows = "".join(
+        f"<tr><td>{ind}</td><td>{freq}</td><td>{latest}</td><td>{badge[status]}</td></tr>"
+        for ind, freq, latest, status in ragged_data
+    )
+    st.markdown(f"""
+    <table class="ragged-table">
+        <thead><tr>
+            <th>Indicator</th><th>Frequency</th><th>Latest Available</th><th>Status</th>
+        </tr></thead>
+        <tbody>{rows}</tbody>
+    </table>
+    """, unsafe_allow_html=True)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 2 — MODEL PERFORMANCE
+# ─────────────────────────────────────────────────────────────────────────────
+with tab2:
+    col_bar, col_donut = st.columns([3, 2])
+
+    with col_bar:
+        st.markdown('<p class="section-header">Forecast Error (RMSFE)</p>', unsafe_allow_html=True)
+        st.caption("Lower RMSFE = better fit. Bar labels show inverse-RMSFE ensemble weight.")
+
+        sorted_m = mdf.sort_values("RMSFE", ascending=True).reset_index(drop=True)
+        bar_colors = [GREEN if i == 0 else STEEL for i in range(len(sorted_m))]
+
+        fig_bar = go.Figure(go.Bar(
+            x=sorted_m["RMSFE"],
+            y=sorted_m["Model"],
+            orientation="h",
+            marker_color=bar_colors,
+            text=[f"  {r:.3f}   weight: {w:.1f}%"
+                  for r, w in zip(sorted_m["RMSFE"], sorted_m["Weight"])],
+            textposition="outside",
+            textfont=dict(color="#888", size=12),
+            hovertemplate="<b>%{y}</b><br>RMSFE: %{x:.3f}<extra></extra>"
+        ))
+        fig_bar.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor=CARD_BG,
+            font=dict(family="Inter, sans-serif", color="#ffffff"),
+            margin=dict(l=20, r=140, t=10, b=20),
+            xaxis=dict(showgrid=True, gridcolor=BORDER,
+                       title="Root Mean Squared Forecast Error"),
+            yaxis=dict(showgrid=False),
+            height=240,
+        )
+        st.plotly_chart(fig_bar, width="stretch")
+
+    with col_donut:
+        st.markdown('<p class="section-header">Ensemble Weights</p>', unsafe_allow_html=True)
+        st.caption("Allocation derived from inverse-RMSFE normalisation.")
+
+        model_colors = [RED, STEEL, AMBER]
+        fig_donut = go.Figure(go.Pie(
+            labels=mdf["Model"],
+            values=mdf["Weight"],
+            hole=0.65,
+            marker=dict(colors=model_colors, line=dict(color=DARK_BG, width=2)),
+            textinfo="label+percent",
+            textfont=dict(size=12),
+            hovertemplate="<b>%{label}</b><br>Weight: %{value:.1f}%<extra></extra>"
+        ))
+        fig_donut.add_annotation(
+            text="Ensemble<br>Weights", x=0.5, y=0.5,
+            font=dict(size=13, color="#ffffff"), showarrow=False
+        )
+        fig_donut.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Inter, sans-serif", color="#ffffff"),
+            margin=dict(l=10, r=10, t=10, b=10),
+            showlegend=False,
+            height=240,
+        )
+        st.plotly_chart(fig_donut, width="stretch")
+
+    # Directional accuracy
+    st.markdown('<p class="section-header">Directional Accuracy</p>', unsafe_allow_html=True)
+    st.caption("Hit rate on predicting GDP direction of change. Baseline: 50% (coin flip).")
+
+    dir_cols = st.columns(len(mdf))
+    for i, (_, row) in enumerate(mdf.iterrows()):
+        acc   = row["Directional_Accuracy"] * 100
+        delta = acc - 50.0
+        with dir_cols[i]:
+            st.metric(
+                label=row["Model"],
+                value=f"{acc:.1f}%",
+                delta=f"{'+' if delta >= 0 else ''}{delta:.1f}pp vs baseline"
+            )
+
+    # Rolling absolute error chart
+    st.markdown('<p class="section-header">Forecast Error Over Time</p>', unsafe_allow_html=True)
+    st.caption("Absolute error (|forecast − actual|) per model across official quarters.")
+
+    off_df = df[df["Status"] == "Official"].copy()
+    err_traces = [
+        ("forecast_AR",       "AR Benchmark",        RED,    "dashdot"),
+        ("forecast_ADL",      "ADL Model",           STEEL,  "dot"),
+        ("forecast_RF",       "Random Forest Bridge",AMBER,  "dashdot"),
+        ("forecast_Ensemble", "Combined Nowcast",    GREEN,  "solid"),
+    ]
+    fig_err = go.Figure()
+    for col, name, color, dash in err_traces:
+        err = (off_df[col] - off_df["actual"]).abs()
+        fig_err.add_trace(go.Scatter(
+            x=off_df["Date"], y=err,
+            mode="lines", name=name,
+            line=dict(color=color, dash=dash, width=2),
+            hovertemplate=f"<b>{name}</b>: %{{y:.2f}}pp<extra></extra>"
+        ))
+    fig_err.update_layout(**base_layout(
+        yaxis=dict(showgrid=True, gridcolor=BORDER,
+                   title="Absolute Forecast Error (pp)"),
+        height=300
+    ))
+    st.plotly_chart(fig_err, width="stretch")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TAB 3 — FORWARD OUTLOOK
+# ─────────────────────────────────────────────────────────────────────────────
+with tab3:
+    col_gauge, col_right = st.columns([1, 2])
+
+    with col_gauge:
+        st.markdown('<p class="section-header">Recession Risk Gauge</p>', unsafe_allow_html=True)
+        st.caption("P(GDP < 0) derived from 95% CI assuming a normal forecast distribution.")
+
+        gauge_color = RED if recession_prob > 30 else AMBER if recession_prob > 15 else GREEN
+        fig_gauge = go.Figure(go.Indicator(
+            mode="gauge+number+delta",
+            value=recession_prob,
+            number={"suffix": "%", "font": {"size": 42, "color": gauge_color}},
+            delta={
+                "reference": 15,
+                "relative": False,
+                "suffix": "pp vs 15% threshold",
+                "increasing": {"color": RED},
+                "decreasing": {"color": GREEN},
+            },
+            gauge={
+                "axis": {
+                    "range": [0, 100],
+                    "ticksuffix": "%",
+                    "tickcolor": "#555",
+                    "tickwidth": 1,
+                    "tickfont": {"color": "#888"},
+                },
+                "bar": {"color": gauge_color, "thickness": 0.25},
+                "bgcolor": CARD_BG,
+                "borderwidth": 0,
+                "steps": [
+                    {"range": [0,  15],  "color": "rgba(92,184,92,0.18)"},
+                    {"range": [15, 30],  "color": "rgba(243,156,18,0.18)"},
+                    {"range": [30, 100], "color": "rgba(231,76,60,0.18)"},
+                ],
+                "threshold": {
+                    "line": {"color": "#ffffff", "width": 2},
+                    "thickness": 0.75,
+                    "value": recession_prob,
+                },
+            }
+        ))
+        fig_gauge.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Inter, sans-serif", color="#ffffff"),
+            margin=dict(l=20, r=20, t=20, b=10),
+            height=300,
+        )
+        st.plotly_chart(fig_gauge, width="stretch")
+
+    with col_right:
+        st.markdown('<p class="section-header">Forward Trajectory</p>', unsafe_allow_html=True)
+        st.caption("Combined nowcast estimates for current and upcoming quarters.")
+
+        fwd = non_official.head(3).reset_index(drop=True)
+        horizon_labels = ["T+0 · Current", "T+1 · Next Quarter", "T+2 · Outlook"]
+
+        if not fwd.empty:
+            fwd_cols = st.columns(len(fwd))
+            for i, (_, row) in enumerate(fwd.iterrows()):
+                period = row["Date"].to_period("Q")
+                label  = horizon_labels[i] if i < len(horizon_labels) else f"T+{i}"
+                ci_str = f"[{row['CI_Lower']:.1f}%, {row['CI_Upper']:.1f}%]"
+                with fwd_cols[i]:
+                    st.metric(
+                        label=f"{label}  ·  {period}",
+                        value=f"{row['forecast_Ensemble']:.2f}%",
+                        delta=f"95% CI: {ci_str}",
+                        delta_color="off"
+                    )
+
+        # CI degradation sparkline
+        st.markdown("")
+        st.markdown('<p class="section-header">Uncertainty Horizon</p>', unsafe_allow_html=True)
+        st.caption("Confidence interval width grows with distance from the current quarter.")
+
+        fwd_all = non_official.head(6).reset_index(drop=True)
+        ci_widths = fwd_all["CI_Upper"] - fwd_all["CI_Lower"]
+        periods   = [str(d.to_period("Q")) for d in fwd_all["Date"]]
+
+        fig_spark = go.Figure()
+        fig_spark.add_trace(go.Scatter(
+            x=periods, y=ci_widths,
+            mode="lines+markers",
+            line=dict(color=STEEL, width=2.5),
+            marker=dict(size=8, color=STEEL, line=dict(color=DARK_BG, width=2)),
+            fill="tozeroy",
+            fillcolor="rgba(70,130,180,0.15)",
+            hovertemplate="<b>%{x}</b><br>CI Width: %{y:.2f}pp<extra></extra>"
+        ))
+        fig_spark.update_layout(
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor=CARD_BG,
+            font=dict(family="Inter, sans-serif", color="#ffffff"),
+            margin=dict(l=20, r=20, t=10, b=20),
+            xaxis=dict(showgrid=False, title="Quarter"),
+            yaxis=dict(showgrid=True, gridcolor=BORDER,
+                       title="95% CI Width (pp)"),
+            height=220,
+        )
+        st.plotly_chart(fig_spark, width="stretch")
