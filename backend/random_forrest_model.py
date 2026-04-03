@@ -48,8 +48,8 @@ for n in n_estimators_list:
             random_state=42,
             )
         rf.fit(X_train, y_train)
-        y_pred = rf.predict(X_test)
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        y_pred_loop = rf.predict(X_test)
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred_loop))
         results.append((n, d, rmse))
         #print(f"[COARSE] n={n}, depth={d}, RMSE={rmse:.4f}")
         if rmse < best_rmse:
@@ -65,7 +65,7 @@ rf = RandomForestRegressor(
 )
 rf.fit(X, y)
 Xcurrent = x_full.tail(1)
-y_pred = rf.predict(Xcurrent)  
+#y_pred = rf.predict(Xcurrent)  
 
 # Predict current quarter GDP nowcast
 current_gdp_nowcast = rf.predict(Xcurrent)
@@ -110,8 +110,8 @@ nowcast_row = pd.DataFrame({
 }).set_index("Date")
 cv_results = pd.DataFrame({
     "Date": cv_dates,
-    "Actual": cv_actuals,
-    "Predicted": cv_preds
+    "Actual_GDP": cv_actuals,
+    "Predicted_GDP": cv_preds
 }).set_index("Date")
 cv_results = pd.concat([cv_results, nowcast_row])
 
