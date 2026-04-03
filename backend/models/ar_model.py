@@ -2,10 +2,8 @@ import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 from quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
+from constants import *
 
-# defining constants (to be refactored / moved into another file later)
-
-TARGET_COL = "GDPC1"
 
 # Prepare data set for AR(2)
 def prepare_ar2_dataset(
@@ -17,7 +15,7 @@ def prepare_ar2_dataset(
     Parameters
     ----------
     quarterly_data : pd.DataFrame
-        Quarterly Dataframe from the preprocessing pipeline, containing target column and predictor all columns.
+        Quarterly Dataframe from the preprocessing pipeline.
     target_col :str = TARGET_COL
         Target column for model, defined as GDPC1.
 
