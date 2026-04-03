@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-from quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
-from constants import *
+from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
+from .constants import *
 
 
 # Prepare data set for AR(2)

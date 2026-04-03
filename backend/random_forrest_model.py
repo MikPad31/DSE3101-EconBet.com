@@ -3,6 +3,7 @@ import os
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import TimeSeriesSplit
 from quarterly_and_monthly_data import get_quarterly_data_rf, months_missing
 
 # get current file directory
@@ -26,97 +27,111 @@ y = df_quarterly.loc[train_mask, 'GDPC1']
 X = X.dropna()
 y = y.loc[X.index]
 
-# split into train and test sets (train - first 80% of observations, test - last 20% of observations)
-split_index = int(len(X) * 0.8)
-X_train = X.iloc[:split_index]
-X_test  = X.iloc[split_index:]
-y_train = y.iloc[:split_index]
-y_test  = y.iloc[split_index:]
+#Getting Best Parameters Using Time Series Split
+tscv = TimeSeriesSplit(n_splits=5)
 
-#find the optimal number of trees (n_estimators) & depth using out-of-bag error
-n_estimators_list = list(range(100, 501, 100))
-max_depth_list = list(range(3, 16, 2)) + [None]
+n_estimators_list = [100, 200, 300] 
+max_depth_list = [3, 5, 7, None]   
 results = []
+
 best_rmse = float('inf')
 best_params = None
-
 for n in n_estimators_list:
     for d in max_depth_list:
-        rf = RandomForestRegressor(
-            n_estimators=n,
-            max_depth=d,
-            random_state=42,
+        fold_rmses = []
+        #splits X and y into 5 successive chunks
+        for train_index, val_index in tscv.split(X):
+            X_t, X_v = X.iloc[train_index], X.iloc[val_index]
+            y_t, y_v = y.iloc[train_index], y.iloc[val_index]
+            rf = RandomForestRegressor(
+                n_estimators=n,
+                max_depth=d,
+                random_state=42,
+                n_jobs=-1 # Uses all CPU cores to speed this up
             )
-        rf.fit(X_train, y_train)
-        y_pred_loop = rf.predict(X_test)
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred_loop))
-        results.append((n, d, rmse))
-        #print(f"[COARSE] n={n}, depth={d}, RMSE={rmse:.4f}")
-        if rmse < best_rmse:
-            best_rmse = rmse
+            rf.fit(X_t, y_t)
+            y_pred = rf.predict(X_v)
+            rmse = np.sqrt(mean_squared_error(y_v, y_pred))
+            fold_rmses.append(rmse)
+        
+        #Calculate Average Performance across all 5 windows
+        avg_rmse = np.mean(fold_rmses)
+        results.append((n, d, avg_rmse))
+        if avg_rmse < best_rmse:
+            best_rmse = avg_rmse
             best_params = (n, d)
-            
-# Train best model to predict current GDP nowcast
-best_n, best_d = best_params
-rf = RandomForestRegressor(
-    n_estimators=best_n,
-    max_depth=best_d,
-    random_state=42
-)
-rf.fit(X, y)
-Xcurrent = x_full.tail(1)
-#y_pred = rf.predict(Xcurrent)  
 
-# Predict current quarter GDP nowcast
-current_gdp_nowcast = rf.predict(Xcurrent)
-print("\nBest RMSE:", best_rmse)
-print("Best Params:", best_params)
-print(
-    f"Current GDP Nowcast ({Xcurrent.index[0].date()}): {current_gdp_nowcast[0]:.4f} "
-    f"(based on {3 - months_missing}/3 months of data)"
-)
+print(f"Best Parameters found via CV: Trees={best_params[0]}, Depth={best_params[1]}")
+print(f"Average CV RMSE: {best_rmse:.4f}")
+best_n, best_d = best_params
+
 # Historical Predictions (CV Approach - RF trained)
 cv_errors = []
 cv_preds = []
 cv_actuals = []
 cv_dates = []
 
-start = int(len(X) * 0.5)
-for i in range(start, len(X)):
-    X_train_cv = X.iloc[:i]
-    y_train_cv = y.iloc[:i]
-    X_test_cv = X.iloc[i:i+1]
-    y_test_cv = y.iloc[i:i+1]
-    rf_cv = RandomForestRegressor(
-        n_estimators=best_n,
-        max_depth=best_d,
-        random_state=42
-    )
-    rf_cv.fit(X_train_cv, y_train_cv)
-    y_pred_cv = rf_cv.predict(X_test_cv)
-    error = (y_test_cv.values[0] - y_pred_cv[0])**2
-    cv_errors.append(error)
-    cv_preds.append(y_pred_cv[0])
-    cv_actuals.append(y_test_cv.values[0])
-    cv_dates.append(X_test_cv.index[0])
+def get_predicted_vs_actual_df(X, y, best_n, best_d, test_size_pct=0.5):
+    """
+    Simulates a live environment by walking through history and 
+    generating one-quarter-ahead nowcasts.
+    """
+    cv_preds = []
+    cv_actuals = []
+    cv_dates = []
+    start_idx = len(X) - int(len(X) * test_size_pct)
+    for i in range(start_idx, len(X)):
+        X_train_cv = X.iloc[:i]
+        y_train_cv = y.iloc[:i]
+        X_test_cv = X.iloc[i:i+1]
+        y_test_cv = y.iloc[i:i+1]
+        
+        rf_cv = RandomForestRegressor(
+            n_estimators=best_n,
+            max_depth=best_d,
+            random_state=42,
+            n_jobs=-1
+        )
+        rf_cv.fit(X_train_cv, y_train_cv)
+        y_pred_cv = rf_cv.predict(X_test_cv)
 
-cv_rmse = np.sqrt(np.mean(cv_errors))
-print("CV RMSE:", cv_rmse)
+        cv_preds.append(y_pred_cv[0])
+        cv_actuals.append(y_test_cv.values[0])
+        cv_dates.append(X_test_cv.index[0])
+    results_df = pd.DataFrame({
+        "Actual_GDP": cv_actuals,
+        "Predicted_GDP": cv_preds
+    }, index=cv_dates)
+    total_rmse = np.sqrt(mean_squared_error(results_df["Actual_GDP"], results_df["Predicted_GDP"]))
+    return results_df, total_rmse
 
+# --- EXECUTION ---
+# This assumes you've already run your tuning loop to get best_n and best_d
+history_df, final_rmse = get_predicted_vs_actual_df(X, y, best_n, best_d)
+print(f"Backtest RMSE (Last {len(history_df)} quarters): {final_rmse:.4f}")
+
+#Nowcasting current quarter GDP  
+rf_final = RandomForestRegressor(
+    n_estimators=best_n, 
+    max_depth=best_d, 
+    random_state=42,
+    n_jobs=-1
+)
+rf_final.fit(X, y)
+Xcurrent = x_full.tail(1)
+current_gdp_nowcast = rf_final.predict(Xcurrent)[0]
+
+#Historical Predictions Vs Actuals DataFrame
 nowcast_row = pd.DataFrame({
-    "Date": [Xcurrent.index[0]],
-    "Actual": [np.nan],
-    "Predicted": [current_gdp_nowcast[0]]
-}).set_index("Date")
-cv_results = pd.DataFrame({
-    "Date": cv_dates,
-    "Actual_GDP": cv_actuals,
-    "Predicted_GDP": cv_preds
-}).set_index("Date")
-cv_results = pd.concat([cv_results, nowcast_row])
-
+    "Actual_GDP": [np.nan],
+    "Predicted_GDP": [float(current_gdp_nowcast)]
+}, index=pd.DatetimeIndex([Xcurrent.index[0]]))
+history_df = history_df[["Actual_GDP", "Predicted_GDP"]].astype(float)
+cv_results = pd.concat([history_df, nowcast_row])
 def predicted_vs_actual_gdp():
     return cv_results 
+
+#print(predicted_vs_actual_gdp().head(30))
 
 def get_rf_backtest_output():
     """
@@ -131,5 +146,4 @@ def get_rf_backtest_output():
     dates = results.index
     actual = results["Actual_GDP"].values
     forecast = results["Predicted_GDP"].values
-
     return dates, actual, forecast

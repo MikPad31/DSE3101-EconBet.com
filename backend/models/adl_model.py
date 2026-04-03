@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
+from .constants import *
+from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
 
-from quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
-from constants import *
 
 def prepare_adl_dataset(
     quarterly_data: pd.DataFrame,
@@ -712,5 +712,4 @@ def adl_horizon_forecast(
         "t2_nowcast": t2_nowcast,
         "t2_n_months_obs": t2_n_months_obs
     }
-
     return horizon_forecast

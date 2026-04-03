@@ -202,7 +202,3 @@ months_missing = months_to_quarter_end(last_date)
 
 def get_quarterly_data_rf():
     return Quarterly_RF
-
-print(filled_raw.tail(10))
-print(Monthly_Data.tail(10))
-print(fred_data.tail(10))
