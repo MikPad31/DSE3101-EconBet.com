@@ -3,16 +3,7 @@ import numpy as np
 import statsmodels.api as sm
 
 from quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
-
-TARGET_COL = "GDPC1"
-COVID_COL = "Covid"
-DEFAULT_GDP_LAGS = 2
-DEFAULT_PREDICTOR_LAGS = 1
-MAX_GDP_LAGS = 4
-MAX_PREDICTOR_LAGS = 2
-DEFAULT_CV_N_SPLITS = 5
-MIN_CV_TRAIN_SIZE = 20
-
+from constants import *
 
 def prepare_adl_dataset(
     quarterly_data: pd.DataFrame,
@@ -23,8 +14,31 @@ def prepare_adl_dataset(
     include_covid: bool = False,
     covid_col: str = COVID_COL
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Prepare the dataset for ADL regression from quarterly data.
+    """Prepares the dataset for ADL regression from quarterly data.
+    
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    target_col : str = TARGET_COL
+        Target column for model, defined as GDPC1.
+    predictor_cols : list[str] | None = None
+        List of predictor column names to include as distributed lags, if None, all columns are included except target column.
+    target_lags: int = DEFAULT_GDP_LAGS
+        Number of autoregressive lags for target column (GDP) to include.
+    predictor_lags : int = DEFAULT_PREDICTOR_LAGS
+        Number of distributed lags per predictor.
+    include_covid : bool = False
+        Indicator for whether COVID dummy variable is to be included, defaults to False.
+    covid_col : str = COVID_COL
+        COVID dummy column to be included.
+
+    Returns
+    -------
+    full_df : pd.DataFrame
+        Full dataset containing all constructed lag columns, including rows with NaNs.
+    model_df: pd.DataFrame
+        Cleaned dataset with NaNs dropped for OLS regression.
     """
     df = quarterly_data.copy().sort_index()
 
@@ -63,9 +77,38 @@ def fit_adl_model(
     include_covid: bool = False,
     covid_col: str = COVID_COL
 ):
+    """Function to fit the ADL model on the quarterly data using OLS.
+
+
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    target_col : str = TARGET_COL
+        Target column for model, defined as GDPC1.
+    predictor_cols : list[str] | None = None
+        List of predictor column names to include as distributed lags, if None, all columns are included except target column.
+    target_lags: int = DEFAULT_GDP_LAGS
+        Number of autoregressive lags for target column (GDP) to include.
+    predictor_lags : int = DEFAULT_PREDICTOR_LAGS
+        Number of distributed lags per predictor.
+    include_covid : bool = False
+        Indicator for whether COVID dummy variable is to be included, defaults to False.
+    covid_col : str = COVID_COL
+        COVID dummy column to be included.
+
+    Returns
+    -------
+    model
+        Fitted statsmodels OLS object.
+    full_df : pd.DataFrame
+        Full dataset containing all constructed lag columns, including rows with NaNs.
+    model_df : pd.DataFrame
+        Estimation sample with fitted values attached as "fitted_adl".
+    feature_cols : list[str]
+        List of regressor column names to be used for downstream analysis.
     """
-    Fit the ADL model using OLS.
-    """
+
     full_df, model_df = prepare_adl_dataset(
         quarterly_data=quarterly_data,
         target_col=target_col,
@@ -124,20 +167,56 @@ def select_adl_lag_order(
     predictor_cols: list[str] | None = None,
     max_target_lags: int = MAX_GDP_LAGS,
     max_predictor_lags: int = MAX_PREDICTOR_LAGS,
+    min_predictor_lags: int = MIN_PREDICTOR_LAGS,
     include_covid: bool = False,
     covid_col: str = COVID_COL,
     criterion: str = "AIC"
 ) -> dict:
+    """Function that selects the optimal ADL lag order by minimising based on the specificied information criterion.
+
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    target_col : str = TARGET_COL
+        Target column for model, defined as GDPC1.
+    predictor_cols : list[str] | None = None
+        List of predictor column names to include as distributed lags, if None, all columns are included except target column.
+    max_target_lags: int = DEFAULT_GDP_LAGS
+        Maximum number of autoregressive lags for target column (GDP) to include.
+    max_predictor_lags : int = DEFAULT_PREDICTOR_LAGS
+        Maximum number of distributed lags per predictor.
+    min_predictor_lags : int = MIN_PREDICTOR_LAGS
+        Minimum number of distributed lags per predictor.
+    include_covid : bool = False
+        Indicator for whether COVID dummy variable is to be included, defaults to False.
+    covid_col : str = COVID_COL
+        COVID dummy column to be included.
+    criterion : str = "AIC"
+        Information criterion to minimise, choice between "AIC" or "BIC". Defaults to "AIC".
+    
+    Returns
+    -------
+    best_lag : dict
+        Dictionary with the following keys:
+            "target_lags" : int
+                Optimal number of AR lags for target variable (GDP growth).
+            "predictor_lags" : int
+                Optimal number of AR lags of distributed lags for predictors.
+            criterion : float
+                Value of the chosen criterion at the optimum.
+            "results_grid" : pd.DataFrame
+                Full grid of criterion values.    
     """
-    Select the optimal ADL lag order by minimizing AIC or BIC.
-    """
+
+    criterion = criterion.upper()
     if criterion not in ("AIC", "BIC"):
         raise ValueError("Criterion must be 'AIC' or 'BIC'.")
 
     records = []
 
     for p in range(1, max_target_lags + 1):
-        for q in range(0, max_predictor_lags + 1):
+        for q in range(min_predictor_lags, max_predictor_lags + 1):
             try:
                 model, _, _, _ = fit_adl_model(
                     quarterly_data=quarterly_data,
@@ -182,9 +261,47 @@ def cv_adl_model(
     n_splits: int = DEFAULT_CV_N_SPLITS,
     min_train_size: int = MIN_CV_TRAIN_SIZE
 ) -> dict:
+    """Function to evaluate ADL model via expanding-window time-series cross-validation.
+    
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    target_lags : int
+        AR lag order for target variable (GDP) (p).
+    predictor_lags : int
+        Distributed lag order for predictors (q).
+    target_col : str = TARGET_COL
+        Target column for model, defined as GDPC1.
+    predictor_cols : list[str] | None = None
+        List of predictor column names to include as distributed lags, if None, all columns are included except target column.
+    include_covid : bool = False
+        Indicator for whether COVID dummy variable is to be included, defaults to False.
+    covid_col : str = COVID_COL
+        COVID dummy column to be included.
+    n_splits : int = DEFAULT_CV_N_SPLITS
+        Number of CV folds.
+    min_train_size : int = MIN_CV_TRAIN_SIZE
+        Minimum number of observations required in the training window before the first fold is evaluated.
+
+    Returns
+    -------
+    cv_res : dict
+        Dictionary with the following keys:
+            RMSE_folds : list[float]
+                List of per-fold RMSE values.
+            MAE_folds : list[float]
+                List of per-fold MAE values
+            mean_RMSE : float
+                Mean RMSE across all folds.
+            mean_MAE : float
+                Mean MAE across all folds.
+            n_folds_fit : int
+                Number of folds successfully fitted.
+            fold_details : list[dict]
+                List of dictionaries with fold-level metadata
     """
-    Evaluate ADL via expanding-window time-series cross-validation.
-    """
+
     _, model_df = prepare_adl_dataset(
         quarterly_data=quarterly_data,
         target_col=target_col,
@@ -269,12 +386,34 @@ def nowcast_curr_quarter_adl(
     model,
     feature_cols: list[str],
     target_col: str = TARGET_COL,
-    include_covid: bool = False,
+    # include_covid: bool = False,
     covid_col: str = COVID_COL
 ) -> tuple:
+    """Nowcasts GDP growth for the current quarter using the fitted ADl model.
+
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    model
+        Fitted statsmodels OLS object as returned by fit_adl_model().
+    feature_cols : list[str]
+        List of regressor column names (excluding constant), as returned by fit_adl_model().
+    target_col : str = TARGET_COL
+        Target column for model, defined as GDPC1.
+    include_covid : bool = False
+        Indicator for whether COVID dummy variable is to be included, defaults to False.
+    covid_col : str = COVID_COL
+        COVID dummy column to be included.
+
+    Returns
+    -------
+    target_quarter : pd.Timestamp
+        Quarter-start date of the quarter being nowcasted.
+    nowcast : float
+        Predicted GDP growth rate (annualised log growth, same units as GDPC1).
     """
-    Nowcast GDP growth for the current quarter using the fitted ADL model.
-    """
+
     df = quarterly_data.copy().sort_index()
     observed_y = df[target_col].dropna()
 
@@ -335,13 +474,41 @@ def adl_monthly_update_nowcast(
     target_month: str,
     target_col: str = TARGET_COL,
     predictor_cols: list[str] | None = None,
-    predictor_lags: int = DEFAULT_PREDICTOR_LAGS,
-    include_covid: bool = False,
     covid_col: str = COVID_COL
 ) -> tuple:
+    """Produces an ADL nowcast that updates monthly for the quarter containing the target month.
+
+    Note to self: take user input for target_month
+    
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    monthly_data : pd.DataFrame
+        Monthly Dataframe from the preprocessing pipeline.
+    model
+        Fitted statsmodels OLS object as returned by fit_adl_model().
+    feature_cols : list[str]
+        List of regressor column names (excluding constant), as returned by fit_adl_model().
+    target_month : str
+        Month as of which the nowcast is to be produced, must be parseable by pd.Timestamp.
+    target_col : str = TARGET_COL
+        Target column for model, defined as GDPC1.
+    predictor_cols: list[str] | None = None
+        List of predictor column names to include as distributed lags, if None, all columns are included except target column.
+    covid_col : str = COVID_COL
+        COVID dummy column to be included.
+    
+    Returns
+    -------
+    target_quarter : pd.Timestamp
+        Quarter-start date of the quarter being nowcasted.
+    nowcast L float
+        Predicted GDP growth rate for that quarter, updated as of target_month.
+    n_months_observed : int
+        Number of months of within-quarter data available as of target_month (1, 2, or 3), for tracking nowcast revision patterns.
     """
-    Produce an ADL nowcast that updates monthly for the quarter containing target_month.
-    """
+
     target_month = pd.Timestamp(target_month)
     target_quarter = target_month.to_period("Q").to_timestamp()
 
@@ -350,7 +517,8 @@ def adl_monthly_update_nowcast(
 
     observed_y = q_df.loc[q_df.index < target_quarter, target_col].dropna()
 
-    if len(observed_y) < DEFAULT_GDP_LAGS:
+    target_lag_count = len([col for col in feature_cols if col.startswith(f"{target_col}_lag")])
+    if len(observed_y) < target_lag_count:
         raise ValueError(
             f"Insufficient GDP data to nowcast quarter {target_quarter.date()} as of {target_month.date()}."
         )
@@ -377,16 +545,14 @@ def adl_monthly_update_nowcast(
     pred_row = {}
 
     for col in feature_cols:
-        if col == f"{target_col}_lag1":
-            pred_row[col] = float(observed_y.iloc[-1])
-
-        elif col == f"{target_col}_lag2":
-            pred_row[col] = float(observed_y.iloc[-2])
-
-        elif col == covid_col:
+        if col == covid_col:
             pred_row[col] = int(
                 pd.Timestamp("2020-01-01") <= target_quarter <= pd.Timestamp("2021-12-01")
             )
+
+        elif col.startswith(f"{target_col}_lag"):
+            lag_num = int(col.replace(f"{target_col}_lag",""))
+            pred_row[col] = float(observed_y.iloc[-lag_num])
 
         elif col in partial_q_means:
             pred_row[col] = partial_q_means[col]
@@ -411,4 +577,140 @@ def adl_monthly_update_nowcast(
 
     nowcast = float(model.predict(X_new).iloc[0])
 
-    return target_quarter, nowcast, n_months_observeds
+    return target_quarter, nowcast, n_months_observed
+
+def project_next_q_predictors(
+        quarterly_data : pd.DataFrame,
+        predictor_cols : list[str] | None = None
+) -> pd.DataFrame:
+    """Function to project predictors forward by one quarter using AR(1)
+    
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    predictor_cols : list[str] | None = None
+        Columns to project. If None, all columns except TARGET_COL are used.
+
+    Returns
+    -------
+    pd.DataFrame
+        Quarterly data with projected t+2 quarter (2 quarters from last published quarterly GDP data).
+    """
+
+    if predictor_cols is None:
+        predictor_cols = [col for col in quarterly_data.columns if col != TARGET_COL]
+
+    last_idx = quarterly_data.index[-1]
+    next_idx = last_idx + pd.DateOffset(months = 3)
+    next_idx = next_idx.to_period("Q").to_timestamp()
+
+    projected_row = {TARGET_COL: np.nan}
+
+    for col in predictor_cols:
+        series = quarterly_data[col].dropna()
+
+        if len(series) < 3:
+            projected_row[col] = series.mean() if len(series) > 0 else 0.0
+            continue
+
+        y = series.values
+        X_ar = sm.add_constant(y[:-1])
+        y_ar = y[1:]
+
+        try:
+            res = sm.OLS(y_ar, X_ar).fit()
+            projected_row[col] = float(res.params[0] + res.params[1] * y[-1])
+
+        except Exception:
+            projected_row[col] = float(series.iloc[-1])
+
+    projected_df = pd.DataFrame(projected_row, index = [next_idx])
+
+    return pd.concat([quarterly_data, projected_df])
+
+def adl_horizon_forecast(
+        quarterly_data : pd.DataFrame,
+        monthly_data : pd.DataFrame,
+        model,
+        feature_cols : list[str],
+        target_month: str,
+        target_col : str = TARGET_COL,
+        predictor_cols : list[str] | None = None,
+        covid_col : str = COVID_COL
+) -> dict:
+    """Produces ADL nowcasts for t+1 (current unobserved quarter) and t+2 (next quarter).
+    
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    monthly_data : pd.DataFrame
+        Monthly Dataframe from the preprocessing pipeline.
+    model
+        Fitted statsmodels OLS object as returned by fit_adl_model().
+    feature_cols : list[str]
+        List of regressor column names (excluding constant), as returned by fit_adl_model().
+    target_month : str
+        Month as of which the nowcast is to be produced, must be parseable by pd.Timestamp.
+    target_col : str = TARGET_COL
+        Target column for model, defined as GDPC1.
+    predictor_cols : list[str] | None = None
+        Columns to project. If None, all columns except TARGET_COL are used.
+    covid_col : str = COVID_COL
+        COVID dummy column to be included.
+
+    Returns
+    -------
+    horizon_forecast : dict
+        Dictionary with keys:
+            t1_target_quarter : pd.Timestamp
+                Timestamp of current quarter.
+            t1_nowcast : float
+                Current quarter nowcast.
+            t1_n_months_obs : int
+                Number of months with observed monthly data in this quarter.
+            t2_target_quarter : pd.Timestamp
+                Timestamp of next quarter.
+            t2_nowcast : flaot
+                Next quarter nowcast.
+            t2_projected_data : pd.Dataframe
+                QQuarterly data (quarterly_data) with t + 2 projected row.
+    """
+    if predictor_cols is None:
+        predictor_cols = [col for col in quarterly_data.columns if col != target_col]
+
+    t1_target_quarter, t1_nowcast, t1_n_month_obs = adl_monthly_update_nowcast(
+        quarterly_data= quarterly_data,
+        monthly_data= monthly_data,
+        model= model,
+        feature_cols= feature_cols,
+        target_month= target_month,
+        target_col= target_col,
+        predictor_cols= predictor_cols,
+        covid_col= covid_col
+    )
+
+    extended_quarterly_data = project_next_q_predictors(
+        quarterly_data= quarterly_data,
+        predictor_cols= predictor_cols
+    )
+
+    t2_target_quarter, t2_nowcast, t2_n_months_obs = nowcast_curr_quarter_adl(
+        quarterly_data= extended_quarterly_data,
+        model= model,
+        feature_cols= feature_cols,
+        target_col= target_col,
+        covid_col= covid_col
+    )
+
+    horizon_forecast = {
+        "t1_target_quarter": t1_target_quarter,
+        "t1_nowcast": t1_nowcast,
+        "t1_n_months_obs": t1_n_month_obs,
+        "t2_target_quarter": t2_target_quarter,
+        "t2_nowcast": t2_nowcast,
+        "t2_n_months_obs": t2_n_months_obs
+    }
+
+    return horizon_forecast
