@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
+from .constants import *
+from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
 
 from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data, project_next_q_predictors
 from backend.models.constants import *
@@ -662,5 +664,4 @@ def adl_horizon_forecast(
         "t2_nowcast": t2_nowcast,
         "t2_projected_data": extended_quarterly_data
     }
-
     return horizon_forecast

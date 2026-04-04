@@ -2,12 +2,21 @@ from fredapi import Fred
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
+from dotenv import load_dotenv
+import os
+from pathlib import Path
 from statsmodels.tsa.stattools import adfuller
 from backend.models.constants import TARGET_COL
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
+#API_KEY = os.getenv("FRED_API_KEY")
+##change to use env before submit!
 API_KEY = "9dbad5d2ff8d714e70fc0d4f94b923b9"
 fred = Fred(api_key = API_KEY)
+
+if not API_KEY:
+    raise ValueError("Missing FRED_API_KEY in .env")
 
 series_ids = ['BAA', 'AAA', 'INDPRO', 'RPI', 'INVEST', 'UNRATE', 'GS10', 'TB3MS', 'CPIAUCSL', 'HOUST']
 #RSXFS: Advance Retail Sales: Retail Trade (millions)
@@ -187,8 +196,11 @@ def get_monthly_data():
 filled_raw = fill_values(fred_data_filtered) 
 Var_Q_raw = filled_raw.resample("QS").mean()
 Quarterly_RF = pd.merge(Var_Q_raw, GDP_Q_diff, left_index=True, right_index=True, how='left')
-Quarterly_RF["Covid"] = ((Quarterly_RF.index >= "2020-01-01") & 
-                          (Quarterly_RF.index <= "2021-12-01")).astype(int)
+Quarterly_RF["Covid"] = ((Quarterly_RF.index >= "2020-01-01") & (Quarterly_RF.index <= "2021-12-01")).astype(int)
+Quarterly_RF["SARS"] = ((Quarterly_RF.index >= "2003-03-01") & (Quarterly_RF.index <= "2003-07-01")).astype(int)
+last_date = fred_data_filtered.index.max()
+months_missing = months_to_quarter_end(last_date)
+
 def get_quarterly_data_rf():
     return Quarterly_RF
 
