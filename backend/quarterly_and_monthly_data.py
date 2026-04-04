@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import adfuller
+from backend.models.constants import TARGET_COL
 
 
 API_KEY = "9dbad5d2ff8d714e70fc0d4f94b923b9"
@@ -190,3 +191,54 @@ Quarterly_RF["Covid"] = ((Quarterly_RF.index >= "2020-01-01") &
                           (Quarterly_RF.index <= "2021-12-01")).astype(int)
 def get_quarterly_data_rf():
     return Quarterly_RF
+
+# Function to project predictors by one quarter
+
+def project_next_q_predictors(
+        quarterly_data : pd.DataFrame,
+        predictor_cols : list[str] | None = None
+) -> pd.DataFrame:
+    """Function to project predictors forward by one quarter using AR(1)
+    
+    Parameters
+    ----------
+    quarterly_data : pd.DataFrame
+        Quarterly Dataframe from the preprocessing pipeline.
+    predictor_cols : list[str] | None = None
+        Columns to project. If None, all columns except TARGET_COL are used.
+
+    Returns
+    -------
+    pd.DataFrame
+        Quarterly data with projected t+2 quarter (2 quarters from last published quarterly GDP data).
+    """
+
+    if predictor_cols is None:
+        predictor_cols = [col for col in quarterly_data.columns if col != TARGET_COL]
+
+    last_idx = quarterly_data[TARGET_COL].dropna().index[-1]
+    next_idx = (last_idx + pd.DateOffset(months=3)).to_period("Q").to_timestamp()
+
+    projected_row = {TARGET_COL: np.nan}
+
+    for col in predictor_cols:
+        series = quarterly_data[col].dropna()
+
+        if len(series) < 3:
+            projected_row[col] = series.mean() if len(series) > 0 else 0.0
+            continue
+
+        y = series.values
+        X_ar = sm.add_constant(y[:-1])
+        y_ar = y[1:]
+
+        try:
+            res = sm.OLS(y_ar, X_ar).fit()
+            projected_row[col] = float(res.params[0] + res.params[1] * y[-1])
+
+        except Exception:
+            projected_row[col] = float(series.iloc[-1])
+
+    projected_df = pd.DataFrame(projected_row, index = [next_idx])
+
+    return pd.concat([quarterly_data, projected_df])

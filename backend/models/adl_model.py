@@ -2,8 +2,8 @@ import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 
-from quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
-from constants import *
+from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data, project_next_q_predictors
+from backend.models.constants import *
 
 def prepare_adl_dataset(
     quarterly_data: pd.DataFrame,
@@ -579,56 +579,6 @@ def adl_monthly_update_nowcast(
 
     return target_quarter, nowcast, n_months_observed
 
-def project_next_q_predictors(
-        quarterly_data : pd.DataFrame,
-        predictor_cols : list[str] | None = None
-) -> pd.DataFrame:
-    """Function to project predictors forward by one quarter using AR(1)
-    
-    Parameters
-    ----------
-    quarterly_data : pd.DataFrame
-        Quarterly Dataframe from the preprocessing pipeline.
-    predictor_cols : list[str] | None = None
-        Columns to project. If None, all columns except TARGET_COL are used.
-
-    Returns
-    -------
-    pd.DataFrame
-        Quarterly data with projected t+2 quarter (2 quarters from last published quarterly GDP data).
-    """
-
-    if predictor_cols is None:
-        predictor_cols = [col for col in quarterly_data.columns if col != TARGET_COL]
-
-    last_idx = quarterly_data.index[-1]
-    next_idx = last_idx + pd.DateOffset(months = 3)
-    next_idx = next_idx.to_period("Q").to_timestamp()
-
-    projected_row = {TARGET_COL: np.nan}
-
-    for col in predictor_cols:
-        series = quarterly_data[col].dropna()
-
-        if len(series) < 3:
-            projected_row[col] = series.mean() if len(series) > 0 else 0.0
-            continue
-
-        y = series.values
-        X_ar = sm.add_constant(y[:-1])
-        y_ar = y[1:]
-
-        try:
-            res = sm.OLS(y_ar, X_ar).fit()
-            projected_row[col] = float(res.params[0] + res.params[1] * y[-1])
-
-        except Exception:
-            projected_row[col] = float(series.iloc[-1])
-
-    projected_df = pd.DataFrame(projected_row, index = [next_idx])
-
-    return pd.concat([quarterly_data, projected_df])
-
 def adl_horizon_forecast(
         quarterly_data : pd.DataFrame,
         monthly_data : pd.DataFrame,
@@ -675,7 +625,7 @@ def adl_horizon_forecast(
             t2_nowcast : flaot
                 Next quarter nowcast.
             t2_projected_data : pd.Dataframe
-                QQuarterly data (quarterly_data) with t + 2 projected row.
+                Quarterly data (quarterly_data) with t + 2 projected row.
     """
     if predictor_cols is None:
         predictor_cols = [col for col in quarterly_data.columns if col != target_col]
@@ -696,7 +646,7 @@ def adl_horizon_forecast(
         predictor_cols= predictor_cols
     )
 
-    t2_target_quarter, t2_nowcast, t2_n_months_obs = nowcast_curr_quarter_adl(
+    t2_target_quarter, t2_nowcast= nowcast_curr_quarter_adl(
         quarterly_data= extended_quarterly_data,
         model= model,
         feature_cols= feature_cols,
@@ -710,7 +660,7 @@ def adl_horizon_forecast(
         "t1_n_months_obs": t1_n_month_obs,
         "t2_target_quarter": t2_target_quarter,
         "t2_nowcast": t2_nowcast,
-        "t2_n_months_obs": t2_n_months_obs
+        "t2_projected_data": extended_quarterly_data
     }
 
     return horizon_forecast
