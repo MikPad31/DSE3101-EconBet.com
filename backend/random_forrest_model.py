@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn.model_selection import TimeSeriesSplit
-from quarterly_and_monthly_data import get_quarterly_data_rf, months_missing
+from quarterly_and_monthly_data import get_quarterly_data_rf, project_next_q_predictors
 
 # get current file directory
 quarterly_data = get_quarterly_data_rf()
@@ -13,14 +13,19 @@ df_quarterly.index = pd.to_datetime(df_quarterly.index)
 df_quarterly = df_quarterly.sort_index()
 
 # feature engineering on dataset
-x_full = df_quarterly.copy()
-x_full['spread'] = x_full['BAA'] - x_full['AAA']
-x_full['term_spread'] = x_full['GS10'] - x_full['TB3MS']
-x_full['INDPRO_growth'] = np.log(x_full['INDPRO']).diff()
-x_full['HOUST_growth'] = np.log(x_full['HOUST']).diff()
-x_full['INVEST_growth'] = np.log(x_full['INVEST']).diff()
-x_full = x_full[['spread', 'term_spread','INDPRO_growth', 
-                 'HOUST_growth', 'UNRATE', 'INVEST_growth', 'Covid', 'SARS']]
+def engineer_features(df: pd.DataFrame, target_col: str = 'GDPC1') -> pd.DataFrame:
+    xf = df.copy()
+    xf['spread'] = xf['BAA'] - xf['AAA']
+    xf['term_spread'] = xf['GS10'] - xf['TB3MS']
+    xf['INDPRO_growth'] = np.log(xf['INDPRO']).diff()
+    xf['HOUST_growth'] = np.log(xf['HOUST']).diff()
+    xf['INVEST_growth'] = np.log(xf['INVEST']).diff()
+    xf["Covid"] = ((xf.index >= "2020-01-01") & (xf.index <= "2021-12-01")).astype(int)
+    feature_cols = [
+        'spread', 'term_spread', 'INDPRO_growth', 
+        'HOUST_growth', 'UNRATE', 'INVEST_growth', 'Covid']
+    return xf[feature_cols]
+x_full = engineer_features(df_quarterly)
 train_mask = df_quarterly['GDPC1'].notna()
 X = x_full[train_mask]
 y = df_quarterly.loc[train_mask, 'GDPC1']
@@ -110,7 +115,7 @@ def get_predicted_vs_actual_df(X, y, best_n, best_d, test_size_pct=0.5):
 history_df, final_rmse = get_predicted_vs_actual_df(X, y, best_n, best_d)
 print(f"Backtest RMSE (Last {len(history_df)} quarters): {final_rmse:.4f}")
 
-#Nowcasting current quarter GDP  
+#Nowcasting current quarter GDP (t+1)
 rf_final = RandomForestRegressor(
     n_estimators=best_n, 
     max_depth=best_d, 
@@ -121,17 +126,26 @@ rf_final.fit(X, y)
 Xcurrent = x_full.tail(1)
 current_gdp_nowcast = rf_final.predict(Xcurrent)[0]
 
-#Historical Predictions Vs Actuals DataFrame
-nowcast_row = pd.DataFrame({
+#project next_quarter predictors (t+2)
+df_quarterly_next = project_next_q_predictors(df_quarterly) 
+x_full_project = engineer_features(df_quarterly_next)
+X_t2 = x_full_project.tail(1)
+gdp_t2 = rf_final.predict(X_t2)[0]
+
+#Historical Predictions Vs Actuals DataFrame (inclu t1 + t2)
+nowcast_row = pd.DataFrame({ #t+1
     "Actual_GDP": [np.nan],
     "Predicted_GDP": [float(current_gdp_nowcast)]
 }, index=pd.DatetimeIndex([Xcurrent.index[0]]))
+t2_row = pd.DataFrame({ #t+2 
+    "Actual_GDP": [np.nan],
+    "Predicted_GDP": [float(gdp_t2)]
+}, index=pd.DatetimeIndex([X_t2.index[0]]))
 history_df = history_df[["Actual_GDP", "Predicted_GDP"]].astype(float)
-cv_results = pd.concat([history_df, nowcast_row])
+cv_results = pd.concat([history_df, nowcast_row, t2_row])
+
 def predicted_vs_actual_gdp():
     return cv_results 
-
-#print(predicted_vs_actual_gdp().head(30))
 
 def get_rf_backtest_output():
     """
@@ -147,3 +161,4 @@ def get_rf_backtest_output():
     actual = results["Actual_GDP"].values
     forecast = results["Predicted_GDP"].values
     return dates, actual, forecast
+

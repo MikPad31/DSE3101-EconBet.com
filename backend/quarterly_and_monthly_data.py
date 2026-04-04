@@ -196,11 +196,8 @@ def get_monthly_data():
 filled_raw = fill_values(fred_data_filtered) 
 Var_Q_raw = filled_raw.resample("QS").mean()
 Quarterly_RF = pd.merge(Var_Q_raw, GDP_Q_diff, left_index=True, right_index=True, how='left')
-Quarterly_RF["Covid"] = ((Quarterly_RF.index >= "2020-01-01") & (Quarterly_RF.index <= "2021-12-01")).astype(int)
-Quarterly_RF["SARS"] = ((Quarterly_RF.index >= "2003-03-01") & (Quarterly_RF.index <= "2003-07-01")).astype(int)
 last_date = fred_data_filtered.index.max()
 months_missing = months_to_quarter_end(last_date)
-
 def get_quarterly_data_rf():
     return Quarterly_RF
 
@@ -229,7 +226,7 @@ def project_next_q_predictors(
         predictor_cols = [col for col in quarterly_data.columns if col != TARGET_COL]
 
     last_idx = quarterly_data[TARGET_COL].dropna().index[-1]
-    next_idx = (last_idx + pd.DateOffset(months=3)).to_period("Q").to_timestamp()
+    next_idx = (last_idx + pd.DateOffset(months=6)).to_period("Q").to_timestamp(how = "start")
 
     projected_row = {TARGET_COL: np.nan}
 
