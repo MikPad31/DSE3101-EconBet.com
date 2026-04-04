@@ -156,15 +156,35 @@ export default function App() {
   }, [processedData]);
 
   if (loading) {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+    return (
+      <div className="flex flex-col items-center justify-center h-screen gap-5"
+           style={{ backgroundColor: 'var(--color-bg-dark)', color: 'var(--color-text-dark)' }}>
+        <div className="flex flex-col items-center gap-2">
+          <Activity className="w-8 h-8" style={{ color: 'var(--color-brand-primary)' }} />
+          <span className="text-[11px] tracking-[0.4em] uppercase font-medium"
+                style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>
+            EconBet Terminal
+          </span>
+        </div>
+        <div className="flex gap-1.5">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="w-1.5 h-1.5 rounded-full animate-pulse"
+                 style={{ backgroundColor: 'var(--color-brand-primary)', animationDelay: `${i * 180}ms` }} />
+          ))}
+        </div>
+        <p className="text-xs text-slate-500" style={{ fontFamily: '"IBM Plex Mono", monospace' }}>
+          Initializing macroeconomic models...
+        </p>
+      </div>
+    );
   }
 
   return (
-    <div className="flex min-h-screen font-sans transition-colors duration-300">
+    <div className="flex min-h-screen transition-colors duration-300" style={{ color: 'var(--text)' }}>
       {/* Sidebar - Fixed */}
-      <Sidebar 
-        isDarkMode={isDarkMode} 
-        toggleTheme={() => setIsDarkMode(!isDarkMode)} 
+      <Sidebar
+        isDarkMode={isDarkMode}
+        toggleTheme={() => setIsDarkMode(!isDarkMode)}
         models={models}
         toggleModel={toggleModel}
         vintage={vintage}
@@ -178,57 +198,76 @@ export default function App() {
       />
 
       {/* Main Content - Scrollable */}
-      <div className="flex-1 ml-[16.666667%] lg:ml-[16.666667%] p-6 overflow-y-auto relative">
-        
-        {/* Top Bar with Profile */}
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center text-xs text-gray-500 gap-4">
-            <span>Data vintage: October 01, 2025</span>
-            <span>Frequency: Quarterly</span>
+      <div className="flex-1 ml-[16.666667%] lg:ml-[16.666667%] overflow-y-auto relative main-grid-bg">
+
+        {/* Sticky Top Bar */}
+        <div className="sticky top-0 z-30 flex justify-between items-center px-8 py-4 border-b backdrop-blur-sm"
+             style={{ borderColor: 'var(--border)', backgroundColor: 'color-mix(in srgb, var(--bg) 90%, transparent)' }}>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[10px] font-semibold tracking-[0.35em] uppercase"
+                  style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>
+              EconBet · MacroCast Terminal
+            </span>
+            <div className="flex items-center gap-3 text-[11px] text-gray-500"
+                 style={{ fontFamily: '"IBM Plex Mono", monospace' }}>
+              <span>VINTAGE: OCT 01, 2025</span>
+              <span className="opacity-30">|</span>
+              <span>FREQ: QUARTERLY</span>
+            </div>
           </div>
-          
+
           <div className="relative">
-            <button 
+            <button
               onClick={() => setIsProfileOpen(!isProfileOpen)}
-              className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-medium transition-all hover:border-[var(--color-brand-primary)] hover:text-[var(--color-brand-primary)]"
+              style={{ borderColor: 'var(--border)', color: 'var(--text)' }}
             >
-              <User className="w-5 h-5" />
+              <User className="w-3.5 h-3.5" />
+              <span>Account</span>
             </button>
-            
+
             {isProfileOpen && (
-              <div className="absolute right-0 mt-2 w-48 rounded-md shadow-lg py-1 border z-50"
-                   style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
-                <button className="flex items-center w-full px-4 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/5">
-                  <LogIn className="w-4 h-4 mr-2" /> Sign In
+              <div className="absolute right-0 mt-2 w-48 rounded-lg shadow-xl py-1 border z-50"
+                   style={{ backgroundColor: 'var(--sidebar)', borderColor: 'var(--border)' }}>
+                <button className="flex items-center w-full px-4 py-2.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
+                  <LogIn className="w-4 h-4 mr-2.5 opacity-60" /> Sign In
                 </button>
-                <button 
+                <button
                   onClick={() => { setIsReadMeOpen(true); setIsProfileOpen(false); }}
-                  className="flex items-center w-full px-4 py-2 text-sm hover:bg-black/5 dark:hover:bg-white/5"
+                  className="flex items-center w-full px-4 py-2.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 >
-                  <FileText className="w-4 h-4 mr-2" /> Read Me
+                  <FileText className="w-4 h-4 mr-2.5 opacity-60" /> Read Me
                 </button>
               </div>
             )}
           </div>
         </div>
 
-        <div className="max-w-7xl mx-auto">
+        <div className="max-w-7xl mx-auto px-8 py-6">
           <KPIRibbon {...kpis} />
-          
+
           {/* Tabs */}
-          <div className="flex border-b mb-6" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex gap-1 border-b mb-6" style={{ borderColor: 'var(--border)' }}>
             {(['Overview', 'Forward Outlook'] as Tab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
                 className={cn(
-                  "px-4 py-2 text-sm font-medium border-b-2 transition-colors",
-                  activeTab === tab 
-                    ? "border-[var(--color-brand-primary)] text-[var(--color-brand-primary)]" 
-                    : "border-transparent text-gray-500 hover:text-[var(--text)]"
+                  "relative px-5 py-3 text-xs font-semibold tracking-widest uppercase transition-colors duration-200",
+                  activeTab === tab
+                    ? "text-[var(--color-brand-primary)]"
+                    : "text-gray-500 hover:text-[var(--text)]"
                 )}
               >
                 {tab}
+                {activeTab === tab && (
+                  <motion.div
+                    layoutId="tab-indicator"
+                    className="absolute bottom-0 left-0 right-0 h-[2px]"
+                    style={{ backgroundColor: 'var(--color-brand-primary)' }}
+                    transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+                  />
+                )}
               </button>
             ))}
           </div>
@@ -283,47 +322,86 @@ export default function App() {
 
       {/* Read Me Modal */}
       {isReadMeOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col"
-               style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}>
-            <div className="flex justify-between items-center p-4 border-b" style={{ borderColor: 'var(--border)' }}>
-              <h2 className="text-xl font-bold">Read Me: How to use the dashboard</h2>
-              <button onClick={() => setIsReadMeOpen(false)} className="p-1 hover:bg-black/5 dark:hover:bg-white/5 rounded">
-                <X className="w-5 h-5" />
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.97, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.2 }}
+            className="rounded-xl shadow-2xl border max-w-2xl w-full max-h-[88vh] flex flex-col"
+            style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+          >
+            <div className="flex justify-between items-start px-6 py-5 border-b" style={{ borderColor: 'var(--border)' }}>
+              <div>
+                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase mb-1"
+                   style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>
+                  Documentation
+                </p>
+                <h2 className="text-lg font-bold">Using the Dashboard</h2>
+              </div>
+              <button onClick={() => setIsReadMeOpen(false)}
+                      className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors ml-4 mt-0.5">
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-6 overflow-y-auto prose dark:prose-invert max-w-none">
-              <h3>Overview</h3>
-              <p>The MacroCast Terminal is a real-time macroeconomic nowcasting dashboard that visualizes GDP growth predictions using an ensemble of econometric and machine learning models.</p>
-              
-              <h3>Features</h3>
-              <ul>
-                <li><strong>Model Selection:</strong> Toggle individual models (AR, ADL, Random Forest) and the Combined Ensemble Nowcast.</li>
-                <li><strong>GDP Shock Events:</strong> Use the dropdown in the sidebar to jump to historical periods of high volatility (e.g., COVID-19).</li>
-                <li><strong>Interactive Chart:</strong> Zoom in using the timeline buttons (1Y, 5Y, MAX) or the range slider at the bottom.</li>
-                <li><strong>Tabs:</strong> Switch between the Overview chart, Model Performance metrics, and Forward Outlook risk gauges.</li>
-              </ul>
 
-              <h3>Model Performance Data</h3>
-              <div className="overflow-x-auto mt-4">
-                <table className="w-full text-sm text-left border" style={{ borderColor: 'var(--border)' }}>
-                  <thead className="bg-black/5 dark:bg-white/5">
-                    <tr>
-                      <th className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>Model</th>
-                      <th className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>RMSFE</th>
-                      <th className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>Directional Accuracy</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>AR</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>6.56</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>41.5%</td></tr>
-                    <tr><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>ADL</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>1.82</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>58.5%</td></tr>
-                    <tr><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>RF</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>4.96</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>62.3%</td></tr>
-                    <tr><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>Ensemble</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>4.09</td><td className="p-2 border-b" style={{ borderColor: 'var(--border)' }}>64.2%</td></tr>
-                  </tbody>
-                </table>
-              </div>
+            <div className="p-6 overflow-y-auto space-y-6">
+              <section>
+                <h3 className="text-[10px] font-semibold tracking-[0.25em] uppercase mb-2"
+                    style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>Overview</h3>
+                <p className="text-sm leading-relaxed text-gray-500">
+                  The MacroCast Terminal is a real-time macroeconomic nowcasting dashboard that visualizes GDP growth predictions using an ensemble of econometric and machine learning models.
+                </p>
+              </section>
+
+              <section>
+                <h3 className="text-[10px] font-semibold tracking-[0.25em] uppercase mb-3"
+                    style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>Features</h3>
+                <ul className="space-y-2.5">
+                  {[
+                    { label: 'Model Selection', desc: 'Toggle individual models (AR, ADL, Random Forest) and the Combined Ensemble Nowcast.' },
+                    { label: 'GDP Shock Events', desc: 'Use the dropdown in the sidebar to jump to historical periods of high volatility (e.g., COVID-19).' },
+                    { label: 'Interactive Chart', desc: 'Zoom in using the timeline buttons (1Y, 5Y, MAX) or the range slider at the bottom.' },
+                    { label: 'Tabs', desc: 'Switch between the Overview chart, Model Performance metrics, and Forward Outlook risk gauges.' },
+                  ].map(f => (
+                    <li key={f.label} className="flex gap-3 text-sm">
+                      <span className="shrink-0 font-semibold">{f.label}:</span>
+                      <span className="text-gray-500">{f.desc}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-[10px] font-semibold tracking-[0.25em] uppercase mb-3"
+                    style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>Model Performance</h3>
+                <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'color-mix(in srgb, var(--border) 40%, transparent)' }}>
+                        {['Model', 'RMSFE', 'Directional Accuracy'].map(h => (
+                          <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold tracking-wider uppercase text-gray-500">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        { model: 'AR', rmsfe: '6.56', dir: '41.5%' },
+                        { model: 'ADL', rmsfe: '1.82', dir: '58.5%' },
+                        { model: 'RF', rmsfe: '4.96', dir: '62.3%' },
+                        { model: 'Ensemble', rmsfe: '4.09', dir: '64.2%' },
+                      ].map(row => (
+                        <tr key={row.model} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
+                          <td className="px-4 py-3 font-medium">{row.model}</td>
+                          <td className="px-4 py-3 tabular-nums text-gray-500">{row.rmsfe}</td>
+                          <td className="px-4 py-3 tabular-nums font-medium" style={{ color: 'var(--color-brand-success)' }}>{row.dir}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
     </div>
