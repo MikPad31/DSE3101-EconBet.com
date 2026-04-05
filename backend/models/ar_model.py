@@ -1,31 +1,16 @@
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
+from quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
 from .constants import *
 
 
-# Prepare data set for AR(2)
 def prepare_ar2_dataset(
-        quarterly_data : pd.DataFrame,
-        target_col :str = TARGET_COL,
+    quarterly_data: pd.DataFrame,
+    target_col: str = TARGET_COL,
 ):
-    """Function to prepare dataset with 2 time lags.
-    
-    Parameters
-    ----------
-    quarterly_data : pd.DataFrame
-        Quarterly Dataframe from the preprocessing pipeline.
-    target_col :str = TARGET_COL
-        Target column for model, defined as GDPC1.
-
-    Returns
-    -------
-    full_df
-        Full dataset including NaNs
-    model_df
-        Cleaned dataset for regression, dropped NaNs
-
+    """
+    Prepare AR(2) dataset with lag1 and lag2.
     """
     full_df = quarterly_data[[target_col]].copy().sort_index()
 
@@ -36,37 +21,19 @@ def prepare_ar2_dataset(
     return full_df, model_df
 
 
-
-# Fitting AR(2) model
 def fit_ar2_model(
-        quarterly_data : pd.DataFrame,
-        target_col : str = TARGET_COL 
+    quarterly_data: pd.DataFrame,
+    target_col: str = TARGET_COL
 ):
-    """Function to fit AR(2) model on a given data frame.
-
-    Parameters
-    ----------
-    quarterly_data : pd.DataFrame
-        Pandas DataFrame of quarterly data.
-    target_col : str = TARGET_COL
-        Target column for model, defined as GDPC1.
-
-    Returns
-    -------
-    model
-        Fitted statsmodels OLS object.
-    full_df : pd.DataFrame
-        Full quarterly data with lags.
-    model_df : pd.DataFrame
-        Estimation sample with fitted values.
-    
+    """
+    Fit AR(2) model on quarterly GDP data.
     """
     full_df, model_df = prepare_ar2_dataset(
         quarterly_data=quarterly_data,
         target_col=target_col
     )
 
-    X = sm.add_constant(model_df[["lag1", "lag2"]])
+    X = sm.add_constant(model_df[["lag1", "lag2"]], has_constant="add")
     y = model_df[target_col]
 
     model = sm.OLS(y, X).fit()
@@ -76,39 +43,21 @@ def fit_ar2_model(
 
 
 def nowcast_curr_quarter_ar2(
-        quarterly_data : pd.DataFrame,
-        model,
-        target_col : str = TARGET_COL
+    quarterly_data: pd.DataFrame,
+    model,
+    target_col: str = TARGET_COL
 ):
-    """Nowcasts the GDP for the current (unreleased) quarter using fitted AR(2) model and historical quarterly data available.
-    
-    Parameters
-    ----------
-    quarterly_data : pd.DataFrame
-        Pandas DataFrame of quarterly data.
-    model
-        Fitted statsmodels OLS object.
-    target_col :str = TARGET_COL
-        Target column for model, defined as GDPC1.
-
-    Returns
-    -------
-    target_quarter
-        Date of the forecasted quarter.
-    nowcast
-        Predicted GDP growth rate.
     """
-
+    Nowcast GDP for the current unreleased quarter using fitted AR(2).
+    """
     df = quarterly_data.copy().sort_index()
-
     observed_y = df[target_col].dropna()
-    
-    # Check if there is enough data to nowcast current quarter (at least two observed quarters)
+
     if len(observed_y) < 2:
-        raise ValueError("Insufficient data to nowcast with AR(2). Provide at least 2 observed GDP quarters.")
-    
+        raise ValueError("Insufficient data to nowcast with AR(2). Need at least 2 observed quarters.")
+
     last_obs_quarter = observed_y.index[-1]
-    target_quarter = last_obs_quarter + pd.DateOffset(months = 3)
+    target_quarter = last_obs_quarter + pd.DateOffset(months=3)
 
     X_new = pd.DataFrame({
         "const": [1.0],
@@ -120,33 +69,68 @@ def nowcast_curr_quarter_ar2(
     return target_quarter, nowcast
 
 
-# def iterated_ar2_forecast(
-#         model,
-#         y_lag1,
-#         y_lag2
-# ):
-#     """Iterated AR(2) forecast.
-    
-#     Parameters
-#     ----------
-#     model
-#         Fitted statsmodels OLS model.
-#     y_lag1
-#         Most recent observed GDP growth.
-#     y_lag2
-#         Second most recent observed GDP growth.
-
-#     Returns
-#     -------
-#     quarterly_forecasts
-#         pd.Series of forecasts indexed by quarter.
-#     """
-
-#     forecasts = []
-
-def get_ar2_backtest_output(quarterly_data: pd.DataFrame, target_col: str = TARGET_COL):
+def iterated_ar2_forecast(
+    model,
+    y_lag1,
+    y_lag2,
+    start_quarter,
+    steps: int = 2
+):
     """
-    Returns AR(2) backtest output in the exact format needed for ensemble evaluation:
+    Iteratively forecast future AR(2) values.
+
+    Parameters
+    ----------
+    model
+        Fitted statsmodels OLS model.
+    y_lag1
+        Most recent observed / forecast GDP value.
+    y_lag2
+        Second most recent observed / forecast GDP value.
+    start_quarter
+        Quarter timestamp for the first forecast.
+    steps : int
+        Number of future quarters to forecast.
+
+    Returns
+    -------
+    forecast_df : pd.DataFrame
+        DataFrame with columns:
+        date, actual, forecast
+    """
+    rows = []
+    current_q = pd.Timestamp(start_quarter)
+    lag1 = float(y_lag1)
+    lag2 = float(y_lag2)
+
+    for _ in range(steps):
+        X_new = pd.DataFrame({
+            "const": [1.0],
+            "lag1": [lag1],
+            "lag2": [lag2]
+        })
+
+        y_hat = float(model.predict(X_new).iloc[0])
+
+        rows.append({
+            "date": current_q,
+            "actual": np.nan,
+            "forecast": y_hat
+        })
+
+        lag2 = lag1
+        lag1 = y_hat
+        current_q = current_q + pd.DateOffset(months=3)
+
+    return pd.DataFrame(rows)
+
+
+def get_ar2_backtest_output(
+    quarterly_data: pd.DataFrame,
+    target_col: str = TARGET_COL
+):
+    """
+    Return AR(2) historical fitted output for evaluation:
     dates, actual, forecast
     """
     model, full_df, model_df = fit_ar2_model(
@@ -157,5 +141,54 @@ def get_ar2_backtest_output(quarterly_data: pd.DataFrame, target_col: str = TARG
     dates = model_df.index
     actual = model_df[target_col].values
     forecast = model_df["fitted_ar2"].values
+
+    return dates, actual, forecast
+
+
+def get_ar2_full_output(
+    quarterly_data: pd.DataFrame,
+    target_col: str = TARGET_COL,
+    n_future_steps: int = 2
+):
+    """
+    Return AR(2) full output:
+    historical fitted values + future forecast rows.
+
+    Output format:
+        dates, actual, forecast
+    """
+    model, full_df, model_df = fit_ar2_model(
+        quarterly_data=quarterly_data,
+        target_col=target_col
+    )
+
+    # Historical fitted values
+    hist_df = pd.DataFrame({
+        "date": model_df.index,
+        "actual": model_df[target_col].values,
+        "forecast": model_df["fitted_ar2"].values
+    })
+
+    # Future forecasts
+    observed_y = quarterly_data[target_col].dropna().sort_index()
+
+    if len(observed_y) < 2:
+        raise ValueError("Insufficient data to generate future AR(2) forecasts.")
+
+    first_future_quarter = observed_y.index[-1] + pd.DateOffset(months=3)
+
+    future_df = iterated_ar2_forecast(
+        model=model,
+        y_lag1=observed_y.iloc[-1],
+        y_lag2=observed_y.iloc[-2],
+        start_quarter=first_future_quarter,
+        steps=n_future_steps
+    )
+
+    full_output = pd.concat([hist_df, future_df], ignore_index=True)
+
+    dates = full_output["date"].values
+    actual = full_output["actual"].values
+    forecast = full_output["forecast"].values
 
     return dates, actual, forecast
