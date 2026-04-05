@@ -1,27 +1,27 @@
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --color-brand-success: #22c55e;
-  --color-brand-warning: #f59e0b;
-  --color-brand-info: #38bdf8;
-  --color-brand-primary: #38bdf8;
-  --color-brand-danger: #ef4444;
+  --color-brand-success: #5cb85c;
 
-  --color-bg-dark: #020b16;
-  --color-sidebar-dark: #041120;
-  --color-card-dark: #071828;
-  --color-border-dark: #0e2540;
-  --color-text-dark: #cce0f5;
+  --color-brand-warning: #f39c12;
+  --color-brand-info: #3498db;
+  --color-brand-primary: steelblue;
 
-  --color-bg-light: #eef2f7;
-  --color-sidebar-light: #ffffff;
+  --color-bg-dark: #050810;
+  --color-sidebar-dark: #080d18;
+  --color-card-dark: #0c1424;
+  --color-border-dark: #243552;
+  --color-text-dark: #f1f5f9;
+
+  --color-bg-light: #e8ecf2;
+  --color-sidebar-light: #f8fafc;
   --color-card-light: #ffffff;
-  --color-border-light: #d4dde8;
-  --color-text-light: #0f1e30;
+  --color-border-light: #c5cdd8;
+  --color-text-light: #0f1419;
 }
 
 @layer base {
@@ -31,7 +31,9 @@
     --card: var(--color-card-light);
     --border: var(--color-border-light);
     --text: var(--color-text-light);
-    --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.08);
+    --text-muted: rgba(15, 20, 25, 0.55);
+    --chart-grid: rgba(15, 23, 42, 0.07);
+    --shadow-elevated: 0 4px 20px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(15, 23, 42, 0.04);
   }
 
   .dark {
@@ -40,41 +42,73 @@
     --card: var(--color-card-dark);
     --border: var(--color-border-dark);
     --text: var(--color-text-dark);
-    --shadow-card: 0 1px 3px rgba(0,0,0,0.4), 0 8px 32px rgba(0,0,0,0.5);
+    --text-muted: rgba(241, 245, 249, 0.5);
+    --chart-grid: rgba(255, 255, 255, 0.055);
+    --shadow-elevated: 0 12px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
   }
 
   body {
-    font-family: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
     background-color: var(--bg);
     color: var(--text);
     transition: background-color 0.3s ease, color 0.3s ease;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Scrollbar */
-  ::-webkit-scrollbar { width: 5px; height: 5px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
-  ::-webkit-scrollbar-thumb:hover { background: var(--color-brand-primary); }
-
-  /* Mono for tabular data */
-  .tabular-nums {
-    font-family: "IBM Plex Mono", ui-monospace, monospace;
-    font-feature-settings: "tnum";
+  /* Avoid clipping fixed-position tour tooltips that extend past main column */
+  #root {
+    min-height: 100vh;
+    overflow: visible;
   }
 }
 
-/* Card depth */
-.rounded-lg {
-  box-shadow: var(--shadow-card);
+/* Elevated surfaces (wave 1 depth) */
+.terminal-card {
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow-elevated);
+  transition:
+    box-shadow 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.2s ease;
 }
 
-/* Background dot-grid texture */
-.main-grid-bg {
-  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-attachment: local;
+.dark .terminal-card {
+  background: linear-gradient(
+    180deg,
+    rgba(20, 32, 56, 0.92),
+    rgba(6, 10, 22, 0.97)
+  );
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.terminal-card:hover {
+  border-color: color-mix(in srgb, var(--border) 85%, var(--text));
+}
+
+.dark .terminal-card:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.terminal-card-hero {
+  box-shadow: var(--shadow-elevated);
+}
+
+.dark .terminal-card-hero {
+  box-shadow:
+    0 12px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(56, 189, 248, 0.12);
+}
+
+.text-muted-terminal {
+  color: var(--text-muted);
+}
+
+.font-tabular-nums-mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 /* rc-slider custom styles */
@@ -84,33 +118,22 @@
 .rc-slider-handle {
   border-color: var(--color-brand-primary) !important;
   background-color: var(--color-brand-primary) !important;
-  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2) !important;
-}
-.rc-slider-handle:hover,
-.rc-slider-handle:focus {
-  box-shadow: 0 0 0 5px rgba(56, 189, 248, 0.25) !important;
 }
 .rc-slider-dot-active {
   border-color: var(--color-brand-primary) !important;
 }
-.rc-slider-rail {
-  background-color: var(--border) !important;
+
+/* Subtle main-area grid (referenced by App) */
+.main-grid-bg {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(to right, color-mix(in srgb, var(--text) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in srgb, var(--text) 5%, transparent) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
-/* Select custom arrow */
-select {
-  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%2338bdf8' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3e%3c/svg%3e");
-  background-position: right 8px center;
-  background-repeat: no-repeat;
-  background-size: 16px 16px;
-  padding-right: 32px !important;
-  appearance: none;
-}
-
-/* Focus ring */
-button:focus-visible,
-select:focus-visible,
-input:focus-visible {
-  outline: 2px solid var(--color-brand-primary);
-  outline-offset: 2px;
+.dark .main-grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
 }

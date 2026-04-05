@@ -1,25 +1,60 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
-import { User, FileText, LogIn, X, Activity } from 'lucide-react';
+import { format, parseISO, getQuarter, getYear } from 'date-fns';
+import { User, LogIn, Activity, GraduationCap } from 'lucide-react';
+import { OnboardingTour, ONBOARDING_STORAGE_KEY } from './components/OnboardingTour';
 import { Sidebar } from './components/Sidebar';
 import { KPIRibbon } from './components/KPIRibbon';
 import { HeroChart } from './components/HeroChart';
 import { ModelPerformance } from './components/ModelPerformance';
 import { ForwardOutlook } from './components/ForwardOutlook';
+import { MacroSignalPanel } from './components/MacroSignalPanel';
 import { ForecastData } from './types';
 import { cn } from './lib/utils';
+import { normalCDF } from './lib/stats';
 
-type Tab = 'Overview' | 'Model Performance' | 'Forward Outlook';
+type Tab = 'Overview' | 'Model Performance' | 'Forward Outlook' | 'Macro Signals';
 
-// Simple approximation for normal CDF
-function normalCDF(x: number, mean: number, std: number) {
-  const z = (x - mean) / std;
-  const t = 1 / (1 + 0.2316419 * Math.abs(z));
-  const d = 0.3989423 * Math.exp(-z * z / 2);
-  const p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
-  return z > 0 ? 1 - p : p;
+const SCENARIO_CONTEXT: Record<
+  string,
+  { title: string; summary: string; storyTags: string }
+> = {
+  covid: {
+    title: 'COVID-19 shock (preset)',
+    summary:
+      'The COVID-19 crisis triggered a sharp global contraction as lockdowns halted activity, oil demand collapsed, and uncertainty spiked, followed by aggressive fiscal stimulus and unprecedented central bank intervention that drove a rapid rebound.',
+    storyTags: 'Health policy · Energy · Fiscal · Central bank',
+  },
+  '2015-slowdown': {
+    title: '2015 slowdown (preset)',
+    summary:
+      'The 2015 slowdown was driven by growth deceleration and yuan devaluation in China, which amplified global uncertainty, weakened manufacturing activity, and triggered a broad downturn in commodity markets.',
+    storyTags: 'FX · Manufacturing · Commodities',
+  },
+};
+
+function scenarioIndexRange(rows: ForecastData[], vintage: string): [number, number] | null {
+  if (vintage === 'covid') {
+    const startIdx = rows.findIndex(d => d.date.startsWith('2019-10'));
+    const endIdx = rows.findIndex(d => d.date.startsWith('2021-04'));
+    if (startIdx === -1 || endIdx === -1) return null;
+    return [startIdx, endIdx];
+  }
+  if (vintage === '2015-slowdown') {
+    const startIdx = rows.findIndex(d => d.date.startsWith('2014-07'));
+    const endIdx = rows.findIndex(d => d.date.startsWith('2016-07'));
+    if (startIdx === -1 || endIdx === -1) return null;
+    return [startIdx, endIdx];
+  }
+  return null;
 }
+
+function formatDataQuarter(dateStr: string) {
+  const d = parseISO(dateStr);
+  return `${getYear(d)} Q${getQuarter(d)}`;
+}
+
 
 export default function App() {
   const [isDarkMode, setIsDarkMode] = useState(true);
@@ -43,7 +78,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('Overview');
   
   const [isProfileOpen, setIsProfileOpen] = useState(false);
-  const [isReadMeOpen, setIsReadMeOpen] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [statusClock, setStatusClock] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setStatusClock(new Date()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // Toggle Theme
   useEffect(() => {
@@ -69,28 +110,39 @@ export default function App() {
     });
   }, []);
 
-  // Handle Vintage (GDP Shock Events) Change
+  useEffect(() => {
+    if (loading) return;
+    try {
+      if (localStorage.getItem(ONBOARDING_STORAGE_KEY) !== '1') setShowOnboarding(true);
+    } catch {
+      setShowOnboarding(true);
+    }
+  }, [loading]);
+
+  const handleOnboardingClose = ({ neverAgain }: { neverAgain: boolean }) => {
+    setShowOnboarding(false);
+    if (neverAgain) {
+      try {
+        localStorage.setItem(ONBOARDING_STORAGE_KEY, '1');
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+
+  // Handle Vintage (GDP Shock Events) Change — same index logic as KPI preset windows
   useEffect(() => {
     if (data.length === 0) return;
-    
+
     if (vintage === 'live') {
       setTimeRange([0, data.length - 1]);
       setActiveRangeButton('MAX');
-    } else if (vintage === 'covid') {
-      // Find index for 2020-01-01 to 2021-01-01
-      const startIdx = data.findIndex(d => d.date.startsWith('2019-10'));
-      const endIdx = data.findIndex(d => d.date.startsWith('2021-04'));
-      if (startIdx !== -1 && endIdx !== -1) {
-        setTimeRange([startIdx, endIdx]);
-        setActiveRangeButton('');
-      }
-    } else if (vintage === '2015-slowdown') {
-      const startIdx = data.findIndex(d => d.date.startsWith('2014-07'));
-      const endIdx = data.findIndex(d => d.date.startsWith('2016-07'));
-      if (startIdx !== -1 && endIdx !== -1) {
-        setTimeRange([startIdx, endIdx]);
-        setActiveRangeButton('');
-      }
+      return;
+    }
+    const bounds = scenarioIndexRange(data, vintage);
+    if (bounds) {
+      setTimeRange(bounds);
+      setActiveRangeButton('');
     }
   }, [vintage, data]);
 
@@ -129,15 +181,32 @@ export default function App() {
     });
   }, [data, useCustomWeights, weights]);
 
+  const kpiSourceRows = useMemo(() => {
+    if (processedData.length < 3) return processedData;
+    if (vintage === 'live') return processedData;
+    const bounds = scenarioIndexRange(processedData, vintage);
+    if (!bounds) return processedData;
+    const [a, b] = bounds;
+    const slice = processedData.slice(a, b + 1);
+    return slice.length >= 3 ? slice : processedData;
+  }, [processedData, vintage]);
+
   const kpis = useMemo(() => {
-    if (processedData.length < 3) return { currentNowcast: 0, prevNowcast: 0, nextForecast: 0, t2Forecast: 0, ciLower: 0, ciUpper: 0, recessionRisk: 0, t0Actual: 0 };
-    
-    // t0 is the last official GDP (we assume the 3rd to last row in our dataset)
-    // t1 is the nowcast (2nd to last row)
-    // t2 is the forecast (last row)
-    const t0Row = processedData[processedData.length - 3];
-    const t1Row = processedData[processedData.length - 2];
-    const t2Row = processedData[processedData.length - 1];
+    const empty = {
+      t0Actual: 0,
+      currentNowcast: 0,
+      prevNowcast: 0,
+      nextForecast: 0,
+      t2Forecast: 0,
+      ciLower: 0,
+      ciUpper: 0,
+      recessionRisk: 0,
+    };
+    if (kpiSourceRows.length < 3) return empty;
+
+    const t0Row = kpiSourceRows[kpiSourceRows.length - 3];
+    const t1Row = kpiSourceRows[kpiSourceRows.length - 2];
+    const t2Row = kpiSourceRows[kpiSourceRows.length - 1];
 
     const currentNowcast = t1Row.forecast_Ensemble;
     const std = (t1Row.CI_Upper - t1Row.CI_Lower) / (2 * 1.96);
@@ -147,13 +216,24 @@ export default function App() {
       t0Actual: t0Row.actual,
       currentNowcast,
       prevNowcast: t0Row.forecast_Ensemble,
-      nextForecast: t1Row.forecast_Ensemble, // t1
-      t2Forecast: t2Row.forecast_Ensemble,   // t2
+      nextForecast: t1Row.forecast_Ensemble,
+      t2Forecast: t2Row.forecast_Ensemble,
       ciLower: t1Row.CI_Lower,
       ciUpper: t1Row.CI_Upper,
-      recessionRisk
+      recessionRisk,
     };
-  }, [processedData]);
+  }, [kpiSourceRows]);
+
+  const kpiRibbonNote = useMemo(() => {
+    if (processedData.length < 3) return '';
+    if (vintage === 'live') {
+      const tail = processedData[processedData.length - 2];
+      return `Headline KPIs · latest quarter in series (${formatDataQuarter(tail.date)})`;
+    }
+    const t1 = kpiSourceRows[kpiSourceRows.length - 2];
+    if (!t1?.date) return 'Preset window · KPIs at end of selected scenario range';
+    return `Preset window · KPIs at end of scenario range (as of ${formatDataQuarter(t1.date)})`;
+  }, [processedData, kpiSourceRows, vintage]);
 
   if (loading) {
     return (
@@ -181,6 +261,16 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen transition-colors duration-300" style={{ color: 'var(--text)' }}>
+      <OnboardingTour
+        open={showOnboarding && !loading}
+        onClose={handleOnboardingClose}
+        layoutKey={activeTab}
+        onPrepareStep={(p) => {
+          if (p === 'overview') setActiveTab('Overview');
+          if (p === 'forward') setActiveTab('Forward Outlook');
+        }}
+      />
+
       {/* Sidebar - Fixed */}
       <Sidebar
         isDarkMode={isDarkMode}
@@ -201,18 +291,38 @@ export default function App() {
       <div className="flex-1 ml-[16.666667%] lg:ml-[16.666667%] overflow-y-auto relative main-grid-bg">
 
         {/* Sticky Top Bar */}
-        <div className="sticky top-0 z-30 flex justify-between items-center px-8 py-4 border-b backdrop-blur-sm"
-             style={{ borderColor: 'var(--border)', backgroundColor: 'color-mix(in srgb, var(--bg) 90%, transparent)' }}>
-          <div className="flex flex-col gap-0.5">
+        <div
+          data-tour="tour-header"
+          className="sticky top-0 z-30 flex justify-between items-center px-8 py-4 border-b backdrop-blur-sm"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'color-mix(in srgb, var(--bg) 90%, transparent)' }}
+        >
+          <div className="flex flex-col gap-1">
             <span className="text-[10px] font-semibold tracking-[0.35em] uppercase"
                   style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>
               EconBet · MacroCast Terminal
             </span>
-            <div className="flex items-center gap-3 text-[11px] text-gray-500"
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500"
                  style={{ fontFamily: '"IBM Plex Mono", monospace' }}>
               <span>VINTAGE: OCT 01, 2025</span>
               <span className="opacity-30">|</span>
               <span>FREQ: QUARTERLY</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[10px] text-muted-terminal"
+                 style={{ fontFamily: '"IBM Plex Mono", monospace' }}>
+              <span>Last updated: {format(statusClock, 'MMM d, yyyy HH:mm')}</span>
+              <span className="opacity-30 hidden sm:inline">|</span>
+              <span className="opacity-30 hidden sm:inline"></span>
+              <span className="flex flex-wrap gap-1.5">
+                {(['AR', 'ADL', 'RF', 'ENS'] as const).map((b) => (
+                  <span
+                    key={b}
+                    className="px-1.5 py-0.5 rounded border font-semibold tracking-wide"
+                    style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
+                  >
+                    {b}
+                  </span>
+                ))}
+              </span>
             </div>
           </div>
 
@@ -227,16 +337,20 @@ export default function App() {
             </button>
 
             {isProfileOpen && (
-              <div className="absolute right-0 mt-2 w-48 rounded-lg shadow-xl py-1 border z-50"
+              <div className="terminal-card absolute right-0 mt-2 w-48 rounded-lg py-1 z-50"
                    style={{ backgroundColor: 'var(--sidebar)', borderColor: 'var(--border)' }}>
                 <button className="flex items-center w-full px-4 py-2.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 transition-colors">
                   <LogIn className="w-4 h-4 mr-2.5 opacity-60" /> Sign In
                 </button>
                 <button
-                  onClick={() => { setIsReadMeOpen(true); setIsProfileOpen(false); }}
+                  type="button"
+                  onClick={() => {
+                    setShowOnboarding(true);
+                    setIsProfileOpen(false);
+                  }}
                   className="flex items-center w-full px-4 py-2.5 text-sm hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 >
-                  <FileText className="w-4 h-4 mr-2.5 opacity-60" /> Read Me
+                  <GraduationCap className="w-4 h-4 mr-2.5 opacity-60" /> User guide
                 </button>
               </div>
             )}
@@ -244,11 +358,34 @@ export default function App() {
         </div>
 
         <div className="max-w-7xl mx-auto px-8 py-6">
-          <KPIRibbon {...kpis} />
+          {vintage !== 'live' && SCENARIO_CONTEXT[vintage] && (
+            <div
+              className="terminal-card mb-4 p-4 rounded-lg border-l-[3px]"
+              style={{ borderLeftColor: 'var(--color-brand-primary)', backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
+            >
+              <p
+                className="text-[10px] font-semibold uppercase tracking-[0.2em] mb-1"
+                style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}
+              >
+                {SCENARIO_CONTEXT[vintage].title}
+              </p>
+              <p className="text-sm text-muted-terminal leading-relaxed">{SCENARIO_CONTEXT[vintage].summary}</p>
+              <p
+                className="text-[10px] mt-2 text-muted-terminal"
+                style={{ fontFamily: '"IBM Plex Mono", monospace' }}
+              >
+                Story tags: {SCENARIO_CONTEXT[vintage].storyTags}
+              </p>
+            </div>
+          )}
+
+          <div data-tour="tour-kpi" className="scroll-mt-6">
+            <KPIRibbon {...kpis} scopeNote={kpiRibbonNote} />
+          </div>
 
           {/* Tabs */}
-          <div className="flex gap-1 border-b mb-6" style={{ borderColor: 'var(--border)' }}>
-            {(['Overview', 'Forward Outlook'] as Tab[]).map((tab) => (
+          <div data-tour="tour-tabs" className="flex gap-1 border-b mb-6" style={{ borderColor: 'var(--border)' }}>
+            {(['Overview', 'Forward Outlook', 'Macro Signals'] as Tab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -282,14 +419,16 @@ export default function App() {
                 exit={{ opacity: 0, y: -10 }}
                 transition={{ duration: 0.3 }}
               >
-                <HeroChart 
-                  data={processedData} 
-                  models={models} 
-                  timeRange={timeRange} 
-                  setTimeRange={setTimeRange}
-                  onRangeButtonClick={handleRangeButtonClick}
-                  activeRangeButton={activeRangeButton}
-                />
+                <div data-tour="tour-chart">
+                  <HeroChart
+                    data={processedData}
+                    models={models}
+                    timeRange={timeRange}
+                    setTimeRange={setTimeRange}
+                    onRangeButtonClick={handleRangeButtonClick}
+                    activeRangeButton={activeRangeButton}
+                  />
+                </div>
               </motion.div>
             )}
 
@@ -316,94 +455,22 @@ export default function App() {
                 <ForwardOutlook {...kpis} isDarkMode={isDarkMode} />
               </motion.div>
             )}
+
+            {activeTab === 'Macro Signals' && (
+              <motion.div
+                key="macro-signals"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+                transition={{ duration: 0.3 }}
+              >
+                <MacroSignalPanel />
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
       </div>
 
-      {/* Read Me Modal */}
-      {isReadMeOpen && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.97, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="rounded-xl shadow-2xl border max-w-2xl w-full max-h-[88vh] flex flex-col"
-            style={{ backgroundColor: 'var(--card)', borderColor: 'var(--border)' }}
-          >
-            <div className="flex justify-between items-start px-6 py-5 border-b" style={{ borderColor: 'var(--border)' }}>
-              <div>
-                <p className="text-[10px] font-semibold tracking-[0.3em] uppercase mb-1"
-                   style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>
-                  Documentation
-                </p>
-                <h2 className="text-lg font-bold">Using the Dashboard</h2>
-              </div>
-              <button onClick={() => setIsReadMeOpen(false)}
-                      className="p-1.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors ml-4 mt-0.5">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-6">
-              <section>
-                <h3 className="text-[10px] font-semibold tracking-[0.25em] uppercase mb-2"
-                    style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>Overview</h3>
-                <p className="text-sm leading-relaxed text-gray-500">
-                  The MacroCast Terminal is a real-time macroeconomic nowcasting dashboard that visualizes GDP growth predictions using an ensemble of econometric and machine learning models.
-                </p>
-              </section>
-
-              <section>
-                <h3 className="text-[10px] font-semibold tracking-[0.25em] uppercase mb-3"
-                    style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>Features</h3>
-                <ul className="space-y-2.5">
-                  {[
-                    { label: 'Model Selection', desc: 'Toggle individual models (AR, ADL, Random Forest) and the Combined Ensemble Nowcast.' },
-                    { label: 'GDP Shock Events', desc: 'Use the dropdown in the sidebar to jump to historical periods of high volatility (e.g., COVID-19).' },
-                    { label: 'Interactive Chart', desc: 'Zoom in using the timeline buttons (1Y, 5Y, MAX) or the range slider at the bottom.' },
-                    { label: 'Tabs', desc: 'Switch between the Overview chart, Model Performance metrics, and Forward Outlook risk gauges.' },
-                  ].map(f => (
-                    <li key={f.label} className="flex gap-3 text-sm">
-                      <span className="shrink-0 font-semibold">{f.label}:</span>
-                      <span className="text-gray-500">{f.desc}</span>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-
-              <section>
-                <h3 className="text-[10px] font-semibold tracking-[0.25em] uppercase mb-3"
-                    style={{ fontFamily: '"IBM Plex Mono", monospace', color: 'var(--color-brand-primary)' }}>Model Performance</h3>
-                <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'color-mix(in srgb, var(--border) 40%, transparent)' }}>
-                        {['Model', 'RMSFE', 'Directional Accuracy'].map(h => (
-                          <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold tracking-wider uppercase text-gray-500">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        { model: 'AR', rmsfe: '6.56', dir: '41.5%' },
-                        { model: 'ADL', rmsfe: '1.82', dir: '58.5%' },
-                        { model: 'RF', rmsfe: '4.96', dir: '62.3%' },
-                        { model: 'Ensemble', rmsfe: '4.09', dir: '64.2%' },
-                      ].map(row => (
-                        <tr key={row.model} className="border-b last:border-0" style={{ borderColor: 'var(--border)' }}>
-                          <td className="px-4 py-3 font-medium">{row.model}</td>
-                          <td className="px-4 py-3 tabular-nums text-gray-500">{row.rmsfe}</td>
-                          <td className="px-4 py-3 tabular-nums font-medium" style={{ color: 'var(--color-brand-success)' }}>{row.dir}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-            </div>
-          </motion.div>
-        </div>
-      )}
     </div>
   );
 }
