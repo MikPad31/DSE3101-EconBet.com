@@ -8,8 +8,8 @@ def standardize_model_output(dates, actual, forecast, model_name="Model"):
     """
     df = pd.DataFrame({
         "date": pd.to_datetime(dates),
-        "actual": np.array(actual, dtype=float),
-        "forecast": np.array(forecast, dtype=float)
+        "actual": pd.to_numeric(pd.Series(actual), errors="coerce"),
+        "forecast": pd.to_numeric(pd.Series(forecast), errors="coerce")
     })
     df["model"] = model_name
     return df
@@ -17,20 +17,38 @@ def standardize_model_output(dates, actual, forecast, model_name="Model"):
 
 def align_model_outputs(model_dfs):
     """
-    Align multiple model output DataFrames on common dates.
+    Align multiple model output DataFrames on all available dates.
+
     Each input DataFrame must have:
     date, actual, forecast, model
+
+    Uses OUTER merge so future forecast rows (actual = NaN) are preserved.
     """
     if not model_dfs:
         raise ValueError("No model outputs were provided.")
 
-    base = model_dfs[0][["date", "actual"]].copy()
+    base = pd.DataFrame({"date": pd.to_datetime([])})
 
+    # Merge all forecast columns
     for df in model_dfs:
         model_name = df["model"].iloc[0]
-        temp = df[["date", "forecast"]].copy()
+
+        temp = df[["date", "actual", "forecast"]].copy()
         temp = temp.rename(columns={"forecast": f"forecast_{model_name}"})
-        base = base.merge(temp, on="date", how="inner")
+
+        if base.empty:
+            base = temp[["date", "actual", f"forecast_{model_name}"]].copy()
+        else:
+            base = base.merge(
+                temp[["date", "actual", f"forecast_{model_name}"]],
+                on="date",
+                how="outer"
+            )
+
+            # Keep actual from whichever model has it
+            if "actual_x" in base.columns and "actual_y" in base.columns:
+                base["actual"] = base["actual_x"].combine_first(base["actual_y"])
+                base = base.drop(columns=["actual_x", "actual_y"])
 
     return base.sort_values("date").reset_index(drop=True)
 
@@ -38,34 +56,52 @@ def align_model_outputs(model_dfs):
 def compute_ensemble_forecast(aligned_df, model_names):
     """
     Compute simple-average ensemble forecast across selected models.
+    Uses available model forecasts row-wise.
     """
     forecast_cols = [f"forecast_{name}" for name in model_names]
-    aligned_df["forecast_Ensemble"] = aligned_df[forecast_cols].mean(axis=1)
+    aligned_df["forecast_Ensemble"] = aligned_df[forecast_cols].mean(axis=1, skipna=True)
     return aligned_df
+
+
+def _get_valid_metric_data(actual, forecast):
+    """
+    Keep only rows where both actual and forecast are available.
+    """
+    actual = np.array(actual, dtype=float)
+    forecast = np.array(forecast, dtype=float)
+
+    mask = ~np.isnan(actual) & ~np.isnan(forecast)
+    return actual[mask], forecast[mask]
 
 
 def compute_rmsfe(actual, forecast):
     """
     Root Mean Squared Forecast Error.
+    Only uses rows with non-missing actual and forecast.
     """
-    actual = np.array(actual, dtype=float)
-    forecast = np.array(forecast, dtype=float)
-    return np.sqrt(np.mean((actual - forecast) ** 2))
+    actual_clean, forecast_clean = _get_valid_metric_data(actual, forecast)
+
+    if len(actual_clean) == 0:
+        return np.nan
+
+    return np.sqrt(np.mean((actual_clean - forecast_clean) ** 2))
 
 
 def compute_directional_accuracy(actual, forecast):
     """
     Percentage of times the forecast correctly predicts
     the direction of change in GDP.
-    """
-    actual = np.array(actual, dtype=float)
-    forecast = np.array(forecast, dtype=float)
 
-    if len(actual) < 2 or len(forecast) < 2:
+    Only uses rows where actual and forecast are both observed.
+    Future rows with actual = NaN are excluded.
+    """
+    actual_clean, forecast_clean = _get_valid_metric_data(actual, forecast)
+
+    if len(actual_clean) < 2 or len(forecast_clean) < 2:
         return np.nan
 
-    actual_diff = np.diff(actual)
-    forecast_diff = np.diff(forecast)
+    actual_diff = np.diff(actual_clean)
+    forecast_diff = np.diff(forecast_clean)
 
     correct = np.sign(actual_diff) == np.sign(forecast_diff)
     return np.mean(correct)
@@ -74,15 +110,26 @@ def compute_directional_accuracy(actual, forecast):
 def compute_confidence_intervals(actual, forecast):
     """
     Compute 95% confidence intervals using historical forecast errors.
-    """
-    actual = np.array(actual, dtype=float)
-    forecast = np.array(forecast, dtype=float)
 
-    errors = actual - forecast
+    The standard deviation is estimated only from rows
+    where actual and forecast are both available.
+    Then CI bands are applied to the full forecast series.
+    """
+    actual_full = np.array(actual, dtype=float)
+    forecast_full = np.array(forecast, dtype=float)
+
+    actual_clean, forecast_clean = _get_valid_metric_data(actual_full, forecast_full)
+
+    if len(actual_clean) < 2:
+        lower = np.full_like(forecast_full, np.nan, dtype=float)
+        upper = np.full_like(forecast_full, np.nan, dtype=float)
+        return lower, upper
+
+    errors = actual_clean - forecast_clean
     std = np.std(errors, ddof=1)
 
-    lower = forecast - 1.96 * std
-    upper = forecast + 1.96 * std
+    lower = forecast_full - 1.96 * std
+    upper = forecast_full + 1.96 * std
 
     return lower, upper
 

@@ -2,10 +2,7 @@ import pandas as pd
 import numpy as np
 import statsmodels.api as sm
 from .constants import *
-from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data
-
-from backend.quarterly_and_monthly_data import get_monthly_data, get_quarterly_data, project_next_q_predictors
-from backend.models.constants import *
+from quarterly_and_monthly_data import get_monthly_data, get_quarterly_data, project_next_q_predictors
 
 def prepare_adl_dataset(
     quarterly_data: pd.DataFrame,
@@ -665,3 +662,65 @@ def adl_horizon_forecast(
         "t2_projected_data": extended_quarterly_data
     }
     return horizon_forecast
+
+
+def get_adl_full_output(
+    quarterly_data: pd.DataFrame,
+    monthly_data: pd.DataFrame,
+    target_month
+):
+    """
+    Return ADL full output:
+    historical fitted values + future forecast rows.
+
+    Output format:
+        dates, actual, forecast
+    """
+    model, full_df, model_df, feature_cols = fit_adl_model(quarterly_data)
+
+    # ======================
+    # HISTORICAL FITTED ROWS
+    # ======================
+    hist_df = pd.DataFrame({
+        "date": model_df.index,
+        "actual": model_df[TARGET_COL].values,
+        "forecast": model_df["fitted_adl"].values
+    })
+
+    # ======================
+    # t+1 FORECAST
+    # ======================
+    horizon_forecast = adl_horizon_forecast(
+        quarterly_data=quarterly_data,
+        monthly_data=monthly_data,
+        model=model,
+        feature_cols=feature_cols,
+        target_month=target_month
+    )
+
+    t1_date = pd.Timestamp(horizon_forecast["t1_target_quarter"])
+    t1_forecast = float(horizon_forecast["t1_nowcast"])
+
+    # ======================
+    # t+2 FORECAST
+    # ======================
+    # If adl_horizon_forecast gives a duplicated t1 date,
+    # force t2 to be exactly one quarter after t1.
+    t2_date = t1_date + pd.DateOffset(months=3)
+    t2_forecast = float(horizon_forecast["t2_nowcast"])
+
+    future_df = pd.DataFrame({
+        "date": [t1_date, t2_date],
+        "actual": [np.nan, np.nan],
+        "forecast": [t1_forecast, t2_forecast]
+    })
+
+    full_output = pd.concat([hist_df, future_df], ignore_index=True)
+    full_output = full_output.drop_duplicates(subset=["date"], keep="last")
+    full_output = full_output.sort_values("date").reset_index(drop=True)
+
+    dates = full_output["date"].values
+    actual = full_output["actual"].values
+    forecast = full_output["forecast"].values
+
+    return dates, actual, forecast

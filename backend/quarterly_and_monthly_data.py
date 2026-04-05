@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import os
 from pathlib import Path
 from statsmodels.tsa.stattools import adfuller
-from backend.models.constants import TARGET_COL
+from models.constants import TARGET_COL
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 

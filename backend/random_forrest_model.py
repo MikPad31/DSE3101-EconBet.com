@@ -147,18 +147,18 @@ cv_results = pd.concat([history_df, nowcast_row, t2_row])
 def predicted_vs_actual_gdp():
     return cv_results 
 
-def get_rf_backtest_output():
+def get_rf_full_output():
     """
-    Returns RF backtest output in the format needed for ensemble evaluation:
-    dates, actual, forecast
+    Returns RF output in the format needed for ensemble evaluation:
+    historical rows + future forecast rows (t+1, t+2).
+
+    Output format:
+        dates, actual, forecast
     """
     results = predicted_vs_actual_gdp().copy()
-
-    # Drop the nowcast row because Actual_GDP is NaN there
-    results = results.dropna(subset=["Actual_GDP", "Predicted_GDP"])
 
     dates = results.index
     actual = results["Actual_GDP"].values
     forecast = results["Predicted_GDP"].values
-    return dates, actual, forecast
 
+    return dates, actual, forecast
