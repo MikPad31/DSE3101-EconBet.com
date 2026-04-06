@@ -1,1 +1,6 @@
-
+pandas
+numpy
+statsmodels
+dash
+dash-bootstrap-components
+plotly
