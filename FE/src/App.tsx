@@ -14,6 +14,15 @@ import { cn } from './lib/utils';
 
 type Tab = 'Overview' | 'Model Performance' | 'Forward Outlook' | 'Ragged Edge';
 
+const SCENARIO_DESCRIPTIONS: Record<string, { title: string, description: string }> = {
+  'covid': { title: 'COVID-19 Shock (2020)', description: 'A severe global economic contraction caused by the COVID-19 pandemic and subsequent lockdowns, followed by a rapid, unprecedented rebound.' },
+  'gfc': { title: 'Global Financial Crisis (2008)', description: 'A severe worldwide economic crisis triggered by the collapse of the US housing bubble and the ensuing subprime mortgage crisis.' },
+  'dotcom': { title: 'Dot-Com Bubble (2001)', description: 'A mild recession following the burst of the dot-com bubble and the September 11 attacks, characterized by a sharp decline in technology stock valuations.' },
+  'volcker': { title: 'Volcker Shock (1980-1982)', description: 'A double-dip recession caused by the Federal Reserve raising interest rates to unprecedented levels to combat high inflation.' },
+  'oil-shock': { title: 'Oil Crisis (1973)', description: 'An economic shock and period of stagflation triggered by the OAPEC oil embargo, leading to soaring fuel prices and reduced economic output.' },
+  '2015-slowdown': { title: 'Industrial Slowdown (2015)', description: 'A period of sluggish growth driven by a strong US dollar, collapsing oil prices, and a slowdown in global manufacturing and trade.' }
+};
+
 import { format, parseISO, getQuarter, getYear } from 'date-fns';
 
 export function formatQuarter(dateStr: string) {
@@ -53,7 +62,7 @@ export default function App() {
   
   const [vintage, setVintage] = useState('live');
   const [timeRange, setTimeRange] = useState<[number, number]>([0, 0]);
-  const [activeRangeButton, setActiveRangeButton] = useState('MAX');
+  const [activeRangeButton, setActiveRangeButton] = useState('10Y');
   const [activeTab, setActiveTab] = useState<Tab>('Overview');
   
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -99,7 +108,13 @@ export default function App() {
       complete: (results) => {
         const parsedData = results.data.filter((d: any) => d.date) as ForecastData[];
         setData(parsedData);
-        setTimeRange([0, parsedData.length - 1]);
+        
+        // Default to 10Y (40 quarters)
+        const endIdx = parsedData.length - 1;
+        const startIdx = Math.max(0, endIdx - 40);
+        setTimeRange([startIdx, endIdx]);
+        setActiveRangeButton('10Y');
+        
         setLoading(false);
       },
     });
@@ -110,8 +125,10 @@ export default function App() {
     if (data.length === 0) return;
     
     if (vintage === 'live') {
-      setTimeRange([0, data.length - 1]);
-      setActiveRangeButton('MAX');
+      const endIdx = data.length - 1;
+      const startIdx = Math.max(0, endIdx - 40);
+      setTimeRange([startIdx, endIdx]);
+      setActiveRangeButton('10Y');
     } else if (vintage === 'covid') {
       // Find index for 2020-01-01 to 2021-01-01
       const startIdx = data.findIndex(d => d.date.startsWith('2019-10'));
@@ -312,6 +329,16 @@ export default function App() {
         </div>
 
         <div className="max-w-7xl mx-auto">
+          {vintage !== 'live' && SCENARIO_DESCRIPTIONS[vintage] && (
+            <div className="mb-6 p-4 rounded-lg border bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 flex items-start gap-3 transition-colors duration-300">
+              <Info className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <h3 className="text-sm font-bold text-blue-900 dark:text-blue-100 mb-1">{SCENARIO_DESCRIPTIONS[vintage].title}</h3>
+                <p className="text-sm text-blue-800 dark:text-blue-200">{SCENARIO_DESCRIPTIONS[vintage].description}</p>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-2 mb-4 font-mono">
             <div className="text-gray-600 dark:text-gray-400 text-xs font-bold uppercase tracking-wider">
               Headline KPIs
