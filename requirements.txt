@@ -4,3 +4,4 @@ statsmodels
 dash
 dash-bootstrap-components
 plotly
+fredapi
