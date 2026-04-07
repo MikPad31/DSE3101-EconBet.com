@@ -1,9 +1,0 @@
-.env
-.DS_Store
-__pycache__/
-*.pyc
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
-*.Rproj

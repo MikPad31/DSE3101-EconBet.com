@@ -1,5 +1,0 @@
-Model,RMSFE,Directional_Accuracy
-AR,4.187,0.515
-ADL,2.034,0.686
-RF,3.505,0.614
-Ensemble,2.841,0.697
