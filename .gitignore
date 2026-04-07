@@ -1,0 +1,27 @@
+# --- System Files ---
+.DS_Store
+Thumbs.db
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.venv/
+env/
+.env/
+
+# --- Node.js / JavaScript ---
+node_modules/
+build/
+dist/
+coverage/
+
+# --- Environment & Secrets ---
+.env
+.env*
+!.env.example
+
+# --- Logs ---
+*.log
